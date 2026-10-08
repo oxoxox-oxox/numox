@@ -1,7 +1,6 @@
-# numc
+# numox
 
-Here's what I did in project 4
--
+This is a simple package to deal with number calculation
 
 # Docker command
 
