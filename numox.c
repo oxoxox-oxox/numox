@@ -529,9 +529,9 @@ PyNumberMethods Matrixox_as_number = {
     .nb_add = (binaryfunc)Matrixox_add,
     .nb_subtract = (binaryfunc)Matrixox_sub,
     .nb_multiply = (binaryfunc)Matrixox_multiply,
-    .nb_absolute = (binaryfunc)Matrixox_abs,
-    .nb_negative = (binaryfunc)Matrixox_neg,
-    .nb_power = (binaryfunc)Matrixox_pow,
+    .nb_absolute = (unaryfunc)Matrixox_abs,
+    .nb_negative = (unaryfunc)Matrixox_neg,
+    .nb_power = (ternaryfunc)Matrixox_pow,
 };
 
 /* INSTANCE METHODS */
