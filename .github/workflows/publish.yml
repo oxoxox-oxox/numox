@@ -13,7 +13,7 @@ jobs:
     runs-on: ${{ matrix.os }}
     strategy:
       matrix:
-        os: [ubuntu-latest, windows-latest, macos-latest]
+        os: [ubuntu-latest, windows-latest]
 
     steps:
       - uses: actions/checkout@v4
@@ -21,10 +21,6 @@ jobs:
       - name: Build wheels with cibuildwheel
         uses: pypa/cibuildwheel@v2.17.0
         env:
-          # 在 Mac 服务器上编译前，先用 brew 安装 libomp 以支持 OpenMP
-          CIBW_BEFORE_ALL_MACOS: "brew install libomp"
-          # 限制 macOS 只编译 x86_64 架构（Intel），避免在 Apple Silicon (ARM) 上编译出错
-          CIBW_ARCHS_MACOS: "x86_64"
           # 跳过太老的 Python 版本和 PyPy 虚拟机，加快编译速度
           CIBW_SKIP: "cp36-* cp37-* pp*"
 
