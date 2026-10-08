@@ -552,7 +552,7 @@ PyObject *Matrixox_set_value(Matrixox *self, PyObject *args)
     }
 
     if (!PyLong_Check(r) || !PyLong_Check(c) ||
-        !PyLong_Check(v) && !PyFloat_Check(v))
+        (!PyLong_Check(v) && !PyFloat_Check(v)))
     {
         PyErr_SetString(PyExc_TypeError, "Invalid argument types");
         return NULL;
@@ -582,7 +582,7 @@ PyObject *Matrixox_get_value(Matrixox *self, PyObject *args)
 {
     PyObject *r = NULL;
     PyObject *c = NULL;
-    PyObject *v = NULL;
+
 
     if (!PyArg_UnpackTuple(args, "get", 2, 2, &r, &c))
     {
