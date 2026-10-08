@@ -1,25 +1,30 @@
-# 1. 直接基于本地已有的 cmu-lab 镜像
-FROM cmu-lab:latest
+FROM ubuntu:22.04
 
-# 2. 换成国内清华大学 apt 镜像源
+# 避免 apt 安装过程中出现交互式时区等弹窗
+ENV DEBIAN_FRONTEND=noninteractive
+# 绕过 Ubuntu 22.04 中 PEP 668 环境限制，允许系统级 pip 安装
+ENV PIP_BREAK_SYSTEM_PACKAGES=1
+
+# 替换 APT 源为清华镜像以加速安装
 RUN sed -i 's@archive.ubuntu.com@mirrors.tuna.tsinghua.edu.cn@g' /etc/apt/sources.list && \
     sed -i 's@security.ubuntu.com@mirrors.tuna.tsinghua.edu.cn@g' /etc/apt/sources.list
 
-# 3. 安装 Proj4 编译所必需的头文件与工具库
+# 安装系统级编译依赖、Python 开发环境和 CUnit
 RUN apt-get update && apt-get install -y --no-install-recommends \
+    build-essential \
+    python3 \
     python3-dev \
-    libcunit1-dev \
     python3-pip \
+    libcunit1-dev \
     && rm -rf /var/lib/apt/lists/*
 
-# 4. 安装测试所需的 Python 包（通过清华源安装适配 Python 3.6 的版本）
-RUN pip3 install -i https://pypi.tuna.tsinghua.edu.cn/simple \
-    numpy==1.19.5 \
-    pytest
+# 配置清华 PyPI 镜像并安装 Python 依赖
+RUN pip3 config set global.index-url https://pypi.tuna.tsinghua.edu.cn/simple && \
+    pip3 install --no-cache-dir \
+    numpy \
+    pytest \
+    setuptools \
+    wheel
 
-# 5. 做软链接，兼容 Makefile 里写死的伯克利 CUnit 路径，无需修改原始 Makefile
-RUN mkdir -p /home/ff/cs61c/cunit/install && \
-    ln -s /usr/include /home/ff/cs61c/cunit/install/include && \
-    ln -s /usr/lib/x86_64-linux-gnu /home/ff/cs61c/cunit/install/lib
-
+# 设定工作区目录
 WORKDIR /workspace
