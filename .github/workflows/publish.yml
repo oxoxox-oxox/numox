@@ -1,0 +1,69 @@
+name: Build and Publish to PyPI
+
+# 设置触发条件：当你推送以 "v" 开头的 Tag 时（例如 git tag v1.0.0 && git push --tags）才执行发布
+on:
+  push:
+    tags:
+      - 'v*'
+
+jobs:
+  # 阶段 1：在三大系统上编译 C 代码二进制包 (Wheels)
+  build_wheels:
+    name: Build wheels on ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build wheels with cibuildwheel
+        uses: pypa/cibuildwheel@v2.17.0
+        env:
+          # 在 Mac 服务器上编译前，先用 brew 安装 libomp 以支持 OpenMP
+          CIBW_BEFORE_ALL_MACOS: "brew install libomp"
+          # 跳过太老的 Python 版本和 PyPy 虚拟机，加快编译速度
+          CIBW_SKIP: "cp36-* cp37-* pp*"
+
+      - name: Upload wheel artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: cibw-wheels-${{ matrix.os }}-${{ strategy.job-index }}
+          path: ./wheelhouse/*.whl
+
+  # 阶段 2：打包纯源码包 (sdist) 作为兜底
+  build_sdist:
+    name: Build source distribution
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build sdist
+        run: pipx run build --sdist
+
+      - name: Upload sdist artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: cibw-sdist
+          path: dist/*.tar.gz
+
+  # 阶段 3：合并文件，发布到 PyPI
+  publish:
+    name: Publish to PyPI
+    needs: [build_wheels, build_sdist]
+    runs-on: ubuntu-latest
+    # 启用 Trusted Publishing 所需的 OIDC 权限
+    permissions:
+      id-token: write
+
+    steps:
+      - name: Download all generated packages
+        uses: actions/download-artifact@v4
+        with:
+          pattern: cibw-*
+          path: dist
+          merge-multiple: true
+
+      - name: Publish package to PyPI
+        uses: pypa/gh-action-pypi-publish@release/v1
