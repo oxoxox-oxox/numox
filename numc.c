@@ -1,4 +1,4 @@
-#include "numox.h"
+#include "numc.h"
 #include <structmember.h>
 
 PyTypeObject MatrixoxType;
@@ -90,7 +90,7 @@ int init_2d(PyObject *self, PyObject *lst)
     if (rows == 0)
     {
         PyErr_SetString(PyExc_ValueError,
-                        "Cannot initialize numox.Matrix with an empty list");
+                        "Cannot initialize numc.Matrix with an empty list");
         return -1;
     }
     int cols;
@@ -321,7 +321,7 @@ PyObject *Matrixox_class_to_list(Matrixox *self, PyObject *args)
     {
         if (!PyObject_TypeCheck(mat, &MatrixoxType))
         {
-            PyErr_SetString(PyExc_TypeError, "Argument must of type numox.Matrix!");
+            PyErr_SetString(PyExc_TypeError, "Argument must of type numc.Matrix!");
             return NULL;
         }
         Matrixox *matox = (Matrixox *)mat;
@@ -338,7 +338,7 @@ PyObject *Matrixox_class_to_list(Matrixox *self, PyObject *args)
  * Add class methods
  */
 PyMethodDef Matrixox_class_methods[] = {
-    {"to_list", (PyCFunction)Matrixox_class_to_list, METH_VARARGS, "Returns a list representation of numox.Matrix"},
+    {"to_list", (PyCFunction)Matrixox_class_to_list, METH_VARARGS, "Returns a list representation of numc.Matrix"},
     {NULL, NULL, 0, NULL}};
 
 /*
@@ -353,7 +353,7 @@ PyObject *Matrixox_repr(PyObject *self)
 /* NUMBER METHODS */
 
 /*
- * Add the second numox.Matrix (Matrixox) object to the first one. The first operand is
+ * Add the second numc.Matrix (Matrixox) object to the first one. The first operand is
  * self, and the second operand can be obtained by casting `args`.
  */
 PyObject *Matrixox_add(Matrixox *self, PyObject *args)
@@ -390,7 +390,7 @@ PyObject *Matrixox_add(Matrixox *self, PyObject *args)
 }
 
 /*
- * Substract the second numox.Matrix (Matrixox) object from the first one. The first operand is
+ * Substract the second numc.Matrix (Matrixox) object from the first one. The first operand is
  * self, and the second operand can be obtained by casting `args`.
  */
 PyObject *Matrixox_sub(Matrixox *self, PyObject *args)
@@ -464,7 +464,7 @@ PyObject *Matrixox_multiply(Matrixox *self, PyObject *args)
 }
 
 /*
- * Negates the given numox.Matrix.
+ * Negates the given numc.Matrix.
  */
 PyObject *Matrixox_neg(Matrixox *self)
 {
@@ -483,7 +483,7 @@ PyObject *Matrixox_neg(Matrixox *self)
 }
 
 /*
- * Take the element-wise absolute value of this numox.Matrix.
+ * Take the element-wise absolute value of this numc.Matrix.
  */
 PyObject *Matrixox_abs(Matrixox *self)
 {
@@ -502,7 +502,7 @@ PyObject *Matrixox_abs(Matrixox *self)
 }
 
 /*
- * Raise numox.Matrix (Matrixox) to the `pow`th power. You can ignore the argument `optional`.
+ * Raise numc.Matrix (Matrixox) to the `pow`th power. You can ignore the argument `optional`.
  */
 PyObject *Matrixox_pow(Matrixox *self, PyObject *pow, PyObject *optional)
 {
@@ -537,7 +537,7 @@ PyNumberMethods Matrixox_as_number = {
 /* INSTANCE METHODS */
 
 /*
- * Given a numox.Matrix self, parse `args` to (int) row, (int) col, and (double/int) val.
+ * Given a numc.Matrix self, parse `args` to (int) row, (int) col, and (double/int) val.
  * Return None in Python (this is different from returning null).
  */
 PyObject *Matrixox_set_value(Matrixox *self, PyObject *args)
@@ -574,7 +574,7 @@ PyObject *Matrixox_set_value(Matrixox *self, PyObject *args)
 }
 
 /*
- * Given a numox.Matrix `self`, parse `args` to (int) row and (int) col.
+ * Given a numc.Matrix `self`, parse `args` to (int) row and (int) col.
  * Return the value at the `row`th row and `col`th column, which is a Python
  * float/int.
  */
@@ -624,7 +624,7 @@ PyMethodDef Matrixox_methods[] = {
 /* INDEXING */
 
 /*
- * Given a numox.Matrix `self`, index into it with `key`. Return the indexed result.
+ * Given a numc.Matrix `self`, index into it with `key`. Return the indexed result.
  */
 PyObject *Matrixox_subscript(Matrixox *self, PyObject *key)
 {
@@ -891,7 +891,7 @@ PyObject *Matrixox_subscript(Matrixox *self, PyObject *key)
 }
 
 /*
- * Given a numox.Matrix `self`, index into it with `key`, and set the indexed result to `v`.
+ * Given a numc.Matrix `self`, index into it with `key`, and set the indexed result to `v`.
  */
 int Matrixox_set_subscript(Matrixox *self, PyObject *key, PyObject *v)
 {
@@ -1132,36 +1132,36 @@ PyMemberDef Matrixox_members[] = {
 
 PyTypeObject MatrixoxType = {
     PyVarObject_HEAD_INIT(NULL, 0)
-        .tp_name = "numox.Matrix",
+        .tp_name = "numc.Matrix",
     .tp_basicsize = sizeof(Matrixox),
     .tp_dealloc = (destructor)Matrixox_dealloc,
     .tp_repr = (reprfunc)Matrixox_repr,
     .tp_as_number = &Matrixox_as_number,
     .tp_flags = Py_TPFLAGS_DEFAULT |
                 Py_TPFLAGS_BASETYPE,
-    .tp_doc = "numox.Matrix objects",
+    .tp_doc = "numc.Matrix objects",
     .tp_methods = Matrixox_methods,
     .tp_members = Matrixox_members,
     .tp_as_mapping = &Matrixox_mapping,
     .tp_init = (initproc)Matrixox_init,
     .tp_new = Matrixox_new};
 
-struct PyModuleDef numoxmodule = {
+struct PyModuleDef numcmodule = {
     PyModuleDef_HEAD_INIT,
-    "numox",
+    "numc",
     "Numc matrix operations",
     -1,
     Matrixox_class_methods};
 
-/* Initialize the numox module */
-PyMODINIT_FUNC PyInit_numox(void)
+/* Initialize the numc module */
+PyMODINIT_FUNC PyInit_numc(void)
 {
     PyObject *m;
 
     if (PyType_Ready(&MatrixoxType) < 0)
         return NULL;
 
-    m = PyModule_Create(&numoxmodule);
+    m = PyModule_Create(&numcmodule);
     if (m == NULL)
         return NULL;
 
