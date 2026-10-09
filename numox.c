@@ -641,7 +641,7 @@ PyObject *Matrixox_subscript(Matrixox *self, PyObject *key)
                 PyErr_SetString(PyExc_IndexError, "Index out of range");
                 return NULL;
             }
-            double val = (self->mat->rows == 1) ? self->mat->data[0][num] : self->mat->data[num][0];
+            double val = (self->mat->rows == 1) ? self->mat->data[num] : self->mat->data[num * self->mat->stride + 0];
             return PyFloat_FromDouble(val);
         }
 

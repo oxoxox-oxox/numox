@@ -2,3 +2,6 @@
 test
 test.py
 /tests
+/build
+/numox.egg-info
+numox.cpython*
