@@ -1,15 +1,16 @@
 #include <Python.h>
 
-typedef struct matrix {
-    int rows;      	// number of rows
-    int cols;      	// number of columns
-    double **data; 	// each element is a pointer to a row of data
-    int is_1d;     	// Whether this matrix is a 1d matrix
+typedef struct matrix
+{
+    int rows;      // number of rows
+    int cols;      // number of columns
+    double *data; // each element is a pointer to a row of data
+    int is_1d;     // Whether this matrix is a 1d matrix
     // For 1D matrix, shape is (rows * cols)
+    int stride;     // the length of one row of physical space
     int ref_cnt;
     struct matrix *parent;
 } matrix;
-
 
 void rand_matrix(matrix *result, unsigned int seed, double low, double high);
 int allocate_matrix(matrix **mat, int rows, int cols);

@@ -71,8 +71,9 @@ int allocate_matrix(matrix **mat, int rows, int cols)
     m->cols = cols;
     m->is_1d = rows == 1 || cols == 1;
     m->ref_cnt = 1;
-    m->data = malloc(rows * sizeof(double *));
+    m->data = malloc(rows * cols * sizeof(double));
     m->parent = NULL;
+    m->stride = cols;
 
     if (m->data == NULL)
     {
@@ -81,23 +82,9 @@ int allocate_matrix(matrix **mat, int rows, int cols)
         return -1;
     }
 
-    for (int i = 0; i < rows; i++)
+    for (int i = 0; i < rows * cols; i++)
     {
-        m->data[i] = malloc(cols * sizeof(double));
-        if (m->data[i] == NULL)
-        {
-            for (int j = 0; j <= i; j++)
-            {
-                free(m->data[j]);
-            }
-            free(m->data);
-            free(m);
-            return -1;
-        }
-        for (int j = 0; j < cols; j++)
-        {
-            m->data[i][j] = 0.0;
-        }
+        m->data[i] = 0.0;
     }
 
     *mat = m;
@@ -123,19 +110,9 @@ int allocate_matrix_ref(matrix **mat, matrix *from, int row_offset, int col_offs
     m->is_1d = rows == 1 || cols == 1;
     m->ref_cnt = 0;
     m->parent = from;
+    m->stride = from->stride;
 
-    m->data = malloc(rows * sizeof(double *));
-    if (m->data == NULL)
-    {
-        free(m->data);
-        free(m);
-        return -1;
-    }
-
-    for (int i = 0; i < rows; i++)
-    {
-        m->data[i] = from->data[row_offset + i] + col_offset;
-    }
+    m->data = from->data + (row_offset * from->stride + col_offset);
 
     from->ref_cnt += 1;
 
@@ -162,17 +139,12 @@ void deallocate_matrix(matrix *mat)
 
     if (mat->parent == NULL)
     {
-        for (int i = 0; i < mat->rows; i++)
-        {
-            free(mat->data[i]);
-        }
+        free(mat->data);
     }
     else
     {
         deallocate_matrix(mat->parent);
     }
-
-    free(mat->data);
     free(mat);
 }
 
@@ -181,7 +153,7 @@ void deallocate_matrix(matrix *mat)
  */
 double get(matrix *mat, int row, int col)
 {
-    return mat->data[row][col];
+    return mat->data[row * mat->stride + col];
 }
 
 /*
@@ -189,7 +161,7 @@ double get(matrix *mat, int row, int col)
  */
 void set(matrix *mat, int row, int col, double val)
 {
-    mat->data[row][col] = val;
+    mat->data[row * mat->stride + col] = val;
 }
 
 /*
@@ -201,7 +173,7 @@ void fill_matrix(matrix *mat, double val)
     {
         for (int j = 0; j < mat->cols; j++)
         {
-            mat->data[i][j] = val;
+            mat->data[i * mat->stride + j] = val;
         }
     }
 }
@@ -224,7 +196,7 @@ int add_matrix(matrix *result, matrix *mat1, matrix *mat2)
     {
         for (int j = 0; j < col; j++)
         {
-            result->data[i][j] = mat1->data[i][j] + mat2->data[i][j];
+            result->data[i * result->stride + j] = mat1->data[i * mat1->stride + j] + mat2->data[i * mat2->stride + j];
         }
     }
 
@@ -249,7 +221,7 @@ int sub_matrix(matrix *result, matrix *mat1, matrix *mat2)
     {
         for (int j = 0; j < col; j++)
         {
-            result->data[i][j] = mat1->data[i][j] - mat2->data[i][j];
+            result->data[i * result->stride + j] = mat1->data[i * mat1->stride + j] - mat2->data[i * mat2->stride + j];
         }
     }
 
@@ -272,17 +244,17 @@ int mul_matrix(matrix *result, matrix *mat1, matrix *mat2)
         return -1;
     }
 
+    fill_matrix(result, 0);
+
     for (int i = 0; i < row1; i++)
     {
-        for (int j = 0; j < col2; j++)
+        for (int k = 0; k < col1; k++)
         {
-            double sum = 0.0;
-            for (int k = 0; k < col1; k++)
+            double r = mat1->data[i * mat1->stride + k];
+            for (int j = 0; j < col2; j++)
             {
-                sum += mat1->data[i][k] * mat2->data[k][j];
+                result->data[i * result->stride + j] += r * mat2->data[k * mat2->stride + j];
             }
-
-            result->data[i][j] = sum;
         }
     }
 
@@ -297,12 +269,11 @@ int pow_matrix(matrix *result, matrix *mat, int pow)
 {
     matrix *template;
     allocate_matrix(&template, mat->rows, mat->cols);
-
     for (int r = 0; r < mat->rows; r++)
     {
         for (int c = 0; c < mat->cols; c++)
         {
-            result->data[r][c] = mat->data[r][c];
+            result->data[r * result->stride + c] = mat->data[r * mat->stride + c];
         }
     }
 
@@ -317,7 +288,7 @@ int pow_matrix(matrix *result, matrix *mat, int pow)
         {
             for (int c = 0; c < mat->cols; c++)
             {
-                result->data[r][c] = template->data[r][c];
+                result->data[r * result->stride + c] = template->data[r * template->stride + c];
             }
         }
     }
@@ -339,10 +310,10 @@ int neg_matrix(matrix *result, matrix *mat)
     {
         for (int j = 0; j < col; j++)
         {
-            double num = mat->data[i][j];
-            result->data[i][j] = -1 * num;
+            result->data[i * result->stride + j] = mat->data[i * mat->stride + j] * -1.0;
         }
     }
+
     return 0;
 }
 
@@ -359,12 +330,12 @@ int abs_matrix(matrix *result, matrix *mat)
     {
         for (int j = 0; j < col; j++)
         {
-            double num = mat->data[i][j];
-            if (num <= 0)
+            double num = mat->data[i * mat->stride + j];
+            if (num < 0)
             {
-                num = -num;
+                num = num * -1.0;
             }
-            result->data[i][j] = num;
+            result->data[i * result->stride + j] = num;
         }
     }
     return 0;
