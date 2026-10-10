@@ -174,10 +174,12 @@ void fill_matrix(matrix *mat, double val)
 {
 
     int i, j;
+    int r = mat->rows;
+    int c = mat->cols;
 #pragma omp parallel for collapse(2) if (mat->rows * mat->cols > 10000)
-    for (i = 0; i < mat->rows; i++)
+    for (i = 0; i < r; i++)
     {
-        for (j = 0; j < mat->cols; j++)
+        for (j = 0; j < c; j++)
         {
             mat->data[i * mat->stride + j] = val;
         }
