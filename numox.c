@@ -140,7 +140,7 @@ void Matrixox_dealloc(Matrixox *self)
 
 /* For immutable types all initializations should take place in tp_new */
 PyObject *Matrixox_new(PyTypeObject *type, PyObject *args,
-                        PyObject *kwds)
+                       PyObject *kwds)
 {
     /* size of allocated memory is tp_basicsize + nitems*tp_itemsize*/
     Matrixox *self = (Matrixox *)type->tp_alloc(type, 0);
@@ -516,6 +516,12 @@ PyObject *Matrixox_pow(Matrixox *self, PyObject *pow, PyObject *optional)
     int p = (int)PyLong_AsLong(pow);
     pow_matrix(ans->mat, self->mat, p);
 
+    if (pow_matrix(ans->mat, self->mat, p) == -1)
+    {
+        PyErr_SetString(PyExc_ValueError, "the matrix must be squre and the pow can't be less than 0");
+        return NULL;
+    }
+
     PyObject *res = (PyObject *)ans;
 
     return res;
@@ -582,7 +588,6 @@ PyObject *Matrixox_get_value(Matrixox *self, PyObject *args)
 {
     PyObject *r = NULL;
     PyObject *c = NULL;
-
 
     if (!PyArg_UnpackTuple(args, "get", 2, 2, &r, &c))
     {
