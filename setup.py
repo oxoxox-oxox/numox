@@ -4,7 +4,7 @@ import sys
 def main():
     # 根据操作系统动态分配编译参数
     if sys.platform == 'win32':
-        CFLAGS = ['/openmp', '/O2', '/arch:AVX']
+        CFLAGS = ['/openmp:llvm', '/O2', '/arch:AVX']
         LDFLAGS = []
     elif sys.platform == 'darwin':
         # Mac OS
