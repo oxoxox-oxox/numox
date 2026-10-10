@@ -82,6 +82,7 @@ int allocate_matrix(matrix **mat, int rows, int cols)
         return -1;
     }
 
+#pragma omp parallel for
     for (int i = 0; i < rows * cols; i++)
     {
         m->data[i] = 0.0;
@@ -169,6 +170,9 @@ void set(matrix *mat, int row, int col, double val)
  */
 void fill_matrix(matrix *mat, double val)
 {
+
+#pragma omp parallel for collapse(2)
+
     for (int i = 0; i < mat->rows; i++)
     {
         for (int j = 0; j < mat->cols; j++)
@@ -192,6 +196,7 @@ int add_matrix(matrix *result, matrix *mat1, matrix *mat2)
     int row = mat1->rows;
     int col = mat2->cols;
 
+#pragma omp parallel for collapse(2) if (row * col > 10000)
     for (int i = 0; i < row; i++)
     {
         for (int j = 0; j < col; j++)
@@ -217,6 +222,7 @@ int sub_matrix(matrix *result, matrix *mat1, matrix *mat2)
     int row = mat1->rows;
     int col = mat2->cols;
 
+#pragma omp parallel for collapse(2)
     for (int i = 0; i < row; i++)
     {
         for (int j = 0; j < col; j++)
@@ -246,6 +252,7 @@ int mul_matrix(matrix *result, matrix *mat1, matrix *mat2)
 
     fill_matrix(result, 0);
 
+#pragma omp parallel for
     for (int i = 0; i < row1; i++)
     {
         for (int k = 0; k < col1; k++)
@@ -282,7 +289,7 @@ int pow_matrix(matrix *result, matrix *mat, int pow)
     {
         // 拿当前的 result 去乘 mat，算好的结果丢进安全的 template 里
         mul_matrix(template, result, mat);
-
+#pragma omp parallel for collapse(2)
         // 把最新结果从 template 拷回 result
         for (int r = 0; r < mat->rows; r++)
         {
@@ -306,6 +313,7 @@ int neg_matrix(matrix *result, matrix *mat)
     int row = mat->rows;
     int col = mat->cols;
 
+#pragma omp parallel for collapse(2)
     for (int i = 0; i < row; i++)
     {
         for (int j = 0; j < col; j++)
@@ -326,6 +334,7 @@ int abs_matrix(matrix *result, matrix *mat)
     int row = mat->rows;
     int col = mat->cols;
 
+#pragma omp parallel for collapse(2)
     for (int i = 0; i < row; i++)
     {
         for (int j = 0; j < col; j++)

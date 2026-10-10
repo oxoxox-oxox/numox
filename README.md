@@ -42,3 +42,10 @@ mat2 = nc.Matrix(3, 3, rand=True, low=0.0, high=1.0)
 result = mat1 + mat2
 print(result.to_list())
 ```
+
+## Test
+
+```python
+python setup.py build_ext --inplace
+python test.py
+```
