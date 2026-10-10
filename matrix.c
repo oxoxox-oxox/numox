@@ -82,8 +82,10 @@ int allocate_matrix(matrix **mat, int rows, int cols)
         return -1;
     }
 
+    int i;
+
 #pragma omp parallel for if (rows * cols > 10000)
-    for (int i = 0; i < rows * cols; i++)
+    for (i = 0; i < rows * cols; i++)
     {
         m->data[i] = 0.0;
     }
@@ -171,10 +173,11 @@ void set(matrix *mat, int row, int col, double val)
 void fill_matrix(matrix *mat, double val)
 {
 
+    int i, j;
 #pragma omp parallel for collapse(2) if (mat->rows * mat->cols > 10000)
-    for (int i = 0; i < mat->rows; i++)
+    for (i = 0; i < mat->rows; i++)
     {
-        for (int j = 0; j < mat->cols; j++)
+        for (j = 0; j < mat->cols; j++)
         {
             mat->data[i * mat->stride + j] = val;
         }
@@ -194,11 +197,12 @@ int add_matrix(matrix *result, matrix *mat1, matrix *mat2)
 
     int row = mat1->rows;
     int col = mat2->cols;
+    int i, j;
 
 #pragma omp parallel for collapse(2) if (row * col > 10000)
-    for (int i = 0; i < row; i++)
+    for (i = 0; i < row; i++)
     {
-        for (int j = 0; j < col; j++)
+        for (j = 0; j < col; j++)
         {
             result->data[i * result->stride + j] = mat1->data[i * mat1->stride + j] + mat2->data[i * mat2->stride + j];
         }
@@ -220,11 +224,12 @@ int sub_matrix(matrix *result, matrix *mat1, matrix *mat2)
 
     int row = mat1->rows;
     int col = mat2->cols;
+    int i, j;
 
 #pragma omp parallel for collapse(2) if (row * col > 10000)
-    for (int i = 0; i < row; i++)
+    for (i = 0; i < row; i++)
     {
-        for (int j = 0; j < col; j++)
+        for (j = 0; j < col; j++)
         {
             result->data[i * result->stride + j] = mat1->data[i * mat1->stride + j] - mat2->data[i * mat2->stride + j];
         }
@@ -250,14 +255,15 @@ int mul_matrix(matrix *result, matrix *mat1, matrix *mat2)
     }
 
     fill_matrix(result, 0);
+    int i, k, j;
 
 #pragma omp parallel for
-    for (int i = 0; i < row1; i++)
+    for (i = 0; i < row1; i++)
     {
-        for (int k = 0; k < col1; k++)
+        for (k = 0; k < col1; k++)
         {
             double r = mat1->data[i * mat1->stride + k];
-            for (int j = 0; j < col2; j++)
+            for (j = 0; j < col2; j++)
             {
                 result->data[i * result->stride + j] += r * mat2->data[k * mat2->stride + j];
             }
@@ -352,11 +358,12 @@ int neg_matrix(matrix *result, matrix *mat)
 {
     int row = mat->rows;
     int col = mat->cols;
+    int i, j;
 
 #pragma omp parallel for collapse(2) if (row * col > 10000)
-    for (int i = 0; i < row; i++)
+    for (i = 0; i < row; i++)
     {
-        for (int j = 0; j < col; j++)
+        for (j = 0; j < col; j++)
         {
             result->data[i * result->stride + j] = mat->data[i * mat->stride + j] * -1.0;
         }
@@ -373,11 +380,12 @@ int abs_matrix(matrix *result, matrix *mat)
 {
     int row = mat->rows;
     int col = mat->cols;
+    int i, j;
 
 #pragma omp parallel for collapse(2) if (row * col > 10000)
-    for (int i = 0; i < row; i++)
+    for (i = 0; i < row; i++)
     {
-        for (int j = 0; j < col; j++)
+        for (j = 0; j < col; j++)
         {
             double num = mat->data[i * mat->stride + j];
             if (num < 0)
