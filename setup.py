@@ -25,7 +25,7 @@ def main():
 
     setup(
         name='numox',
-        version='1.0.2',
+        version='1.0.3',
         author="oxoxox-oxox",
         description='A high-performance C Extension for matrix math',
         long_description=long_description,
