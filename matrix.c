@@ -201,10 +201,22 @@ int add_matrix(matrix *result, matrix *mat1, matrix *mat2)
     int col = mat2->cols;
     int i, j;
 
-#pragma omp parallel for collapse(2) if (row * col > 10000)
+#pragma omp parallel for if (row * col > 10000)
     for (i = 0; i < row; i++)
     {
-        for (j = 0; j < col; j++)
+        j = 0;
+
+        for (; j + 4 <= col; j += 4)
+        {
+            __m256d v1 = _mm256_loadu_pd(&mat1->data[i * mat1->stride + j]);
+            __m256d v2 = _mm256_loadu_pd(&mat2->data[i * mat2->stride + j]);
+
+            __m256d v_sum = _mm256_add_pd(v1, v2);
+
+            _mm256_storeu_pd(&result->data[i * result->stride + j], v_sum);
+        }
+
+        for (; j < col; j++)
         {
             result->data[i * result->stride + j] = mat1->data[i * mat1->stride + j] + mat2->data[i * mat2->stride + j];
         }
@@ -265,7 +277,20 @@ int mul_matrix(matrix *result, matrix *mat1, matrix *mat2)
         for (k = 0; k < col1; k++)
         {
             double r = mat1->data[i * mat1->stride + k];
-            for (j = 0; j < col2; j++)
+
+            __m256d vec_r = _mm256_set1_pd(r);
+            j = 0;
+
+            for (; j + 4 <= col2; j += 4)
+            {
+                __m256d vec_b = _mm256_loadu_pd(&mat2->data[k * mat2->stride + j]);
+                __m256d vec_c = _mm256_loadu_pd(&result->data[i * result->stride + j]);
+                vec_c = _mm256_fmadd_pd(vec_r, vec_b, vec_c);
+
+                _mm256_storeu_pd(&result->data[i * result->stride + j], vec_c);
+            }
+
+            for (; j < col2; j++)
             {
                 result->data[i * result->stride + j] += r * mat2->data[k * mat2->stride + j];
             }

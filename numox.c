@@ -514,8 +514,6 @@ PyObject *Matrixox_pow(Matrixox *self, PyObject *pow, PyObject *optional)
     allocate_matrix(&ans->mat, self->mat->rows, self->mat->cols);
 
     int p = (int)PyLong_AsLong(pow);
-    pow_matrix(ans->mat, self->mat, p);
-
     if (pow_matrix(ans->mat, self->mat, p) == -1)
     {
         PyErr_SetString(PyExc_ValueError, "the matrix must be squre and the pow can't be less than 0");
