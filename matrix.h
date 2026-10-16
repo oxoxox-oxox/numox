@@ -2,18 +2,19 @@
 
 typedef struct matrix
 {
-    int rows;      // number of rows
-    int cols;      // number of columns
+    int rows;     // number of rows
+    int cols;     // number of columns
     double *data; // each element is a pointer to a row of data
-    int is_1d;     // Whether this matrix is a 1d matrix
+    int is_1d;    // Whether this matrix is a 1d matrix
     // For 1D matrix, shape is (rows * cols)
-    int stride;     // the length of one row of physical space
+    int stride; // the length of one row of physical space
     int ref_cnt;
     struct matrix *parent;
 } matrix;
 
 void rand_matrix(matrix *result, unsigned int seed, double low, double high);
 int allocate_matrix(matrix **mat, int rows, int cols);
+int allocate_matrix_raw(matrix **mat, int rows, int cols);
 int allocate_matrix_ref(matrix **mat, matrix *from, int row_offset,
                         int col_offset, int rows, int cols);
 void deallocate_matrix(matrix *mat);
