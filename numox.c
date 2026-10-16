@@ -379,7 +379,7 @@ PyObject *Matrixox_add(Matrixox *self, PyObject *args)
         return NULL;
     }
 
-    allocate_matrix(&ans->mat, self->mat->rows, self->mat->cols);
+    allocate_matrix_raw(&ans->mat, self->mat->rows, self->mat->cols);
     add_matrix(ans->mat, other->mat, self->mat);
 
     ans->shape = get_shape(ans->mat->rows, ans->mat->cols);
