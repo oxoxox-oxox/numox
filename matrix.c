@@ -176,13 +176,13 @@ void set(matrix *mat, int row, int col, double val)
 void fill_matrix(matrix *mat, double val)
 {
 
-    int i, j;
+    int i;
     int r = mat->rows;
     int c = mat->cols;
-#pragma omp parallel for collapse(2) if (mat->rows * mat->cols > 10000)
+#pragma omp parallel for if (mat->rows * mat->cols > 10000)
     for (i = 0; i < r; i++)
     {
-        for (j = 0; j < c; j++)
+        for (int j = 0; j < c; j++)
         {
             mat->data[i * mat->stride + j] = val;
         }
@@ -202,12 +202,12 @@ int add_matrix(matrix *result, matrix *mat1, matrix *mat2)
 
     int row = mat1->rows;
     int col = mat2->cols;
-    int i, j;
+    int i;
 
 #pragma omp parallel for if (row * col > 10000)
     for (i = 0; i < row; i++)
     {
-        j = 0;
+        int j = 0;
 
         for (; j + 4 <= col; j += 4)
         {
@@ -241,12 +241,12 @@ int sub_matrix(matrix *result, matrix *mat1, matrix *mat2)
 
     int row = mat1->rows;
     int col = mat2->cols;
-    int i, j;
+    int i;
 
 #pragma omp parallel for if (row * col > 10000)
     for (i = 0; i < row; i++)
     {
-        j = 0;
+        int j = 0;
         for (; j + 4 <= col; j += 4)
         {
             __m256d v1 = _mm256_loadu_pd(&mat1->data[i * mat1->stride + j]);
@@ -284,9 +284,9 @@ int mul_matrix(matrix *result, matrix *mat1, matrix *mat2)
     double *mat2_T = (double *)malloc(col2 * row2 * sizeof(double));
     if (!mat2_T)
         return -1;
-
+    int c;
 #pragma omp parallel for
-    for (int c = 0; c < col2; c++)
+    for (c = 0; c < col2; c++)
     {
         double *dst_col = &mat2_T[c * row2];
         for (int r = 0; r < row2; r++)
@@ -295,8 +295,10 @@ int mul_matrix(matrix *result, matrix *mat1, matrix *mat2)
         }
     }
 
+    int i;
+
 #pragma omp parallel for schedule(static)
-    for (int i = 0; i < row1; i++)
+    for (i = 0; i < row1; i++)
     {
         const double *row_a = &mat1->data[i * mat1->stride];
         double *row_c = &result->data[i * result->stride];
@@ -426,12 +428,12 @@ int neg_matrix(matrix *result, matrix *mat)
 {
     int row = mat->rows;
     int col = mat->cols;
-    int i, j;
+    int i;
 
-#pragma omp parallel for collapse(2) if (row * col > 10000)
+#pragma omp parallel for if (row * col > 10000)
     for (i = 0; i < row; i++)
     {
-        for (j = 0; j < col; j++)
+        for (int j = 0; j < col; j++)
         {
             result->data[i * result->stride + j] = mat->data[i * mat->stride + j] * -1.0;
         }
@@ -448,12 +450,12 @@ int abs_matrix(matrix *result, matrix *mat)
 {
     int row = mat->rows;
     int col = mat->cols;
-    int i, j;
+    int i;
 
-#pragma omp parallel for collapse(2) if (row * col > 10000)
+#pragma omp parallel for if (row * col > 10000)
     for (i = 0; i < row; i++)
     {
-        for (j = 0; j < col; j++)
+        for (int j = 0; j < col; j++)
         {
             double num = mat->data[i * mat->stride + j];
             if (num < 0)

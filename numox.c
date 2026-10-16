@@ -41,7 +41,7 @@ int init_rand(PyObject *self, int rows, int cols, unsigned int seed, double low,
 int init_fill(PyObject *self, int rows, int cols, double val)
 {
     matrix *new_mat;
-    int alloc_failed = allocate_matrix(&new_mat, rows, cols);
+    int alloc_failed = allocate_matrix_raw(&new_mat, rows, cols);
     if (alloc_failed)
         return alloc_failed;
     else
@@ -135,6 +135,7 @@ int init_2d(PyObject *self, PyObject *lst)
 void Matrixox_dealloc(Matrixox *self)
 {
     deallocate_matrix(self->mat);
+    Py_XDECREF(self->shape);
     Py_TYPE(self)->tp_free(self);
 }
 
@@ -416,7 +417,7 @@ PyObject *Matrixox_sub(Matrixox *self, PyObject *args)
         return NULL;
     }
 
-    allocate_matrix(&ans->mat, self->mat->rows, self->mat->cols);
+    allocate_matrix_raw(&ans->mat, self->mat->rows, self->mat->cols);
     sub_matrix(ans->mat, self->mat, other->mat);
 
     ans->shape = get_shape(ans->mat->rows, ans->mat->cols);
@@ -440,7 +441,7 @@ PyObject *Matrixox_multiply(Matrixox *self, PyObject *args)
 
     Matrixox *other = (Matrixox *)args;
 
-    if (self->mat->rows != other->mat->cols)
+    if (self->mat->cols != other->mat->rows)
     {
         PyErr_SetString(PyExc_ValueError, "Matrix dimention do not match");
         return NULL;
@@ -452,7 +453,7 @@ PyObject *Matrixox_multiply(Matrixox *self, PyObject *args)
         return NULL;
     }
 
-    allocate_matrix_raw(&ans->mat, self->mat->rows, self->mat->cols);
+    allocate_matrix_raw(&ans->mat, self->mat->rows, other->mat->cols);
 
     Py_BEGIN_ALLOW_THREADS
         mul_matrix(ans->mat, self->mat, other->mat);
@@ -475,9 +476,11 @@ PyObject *Matrixox_neg(Matrixox *self)
     {
         return NULL;
     }
-    allocate_matrix(&ans->mat, self->mat->rows, self->mat->cols);
+    allocate_matrix_raw(&ans->mat, self->mat->rows, self->mat->cols);
 
     neg_matrix(ans->mat, self->mat);
+
+    ans->shape = get_shape(ans->mat->rows, ans->mat->cols);
 
     PyObject *res = (PyObject *)ans;
 
@@ -494,9 +497,11 @@ PyObject *Matrixox_abs(Matrixox *self)
     {
         return NULL;
     }
-    allocate_matrix(&ans->mat, self->mat->rows, self->mat->cols);
+    allocate_matrix_raw(&ans->mat, self->mat->rows, self->mat->cols);
 
     abs_matrix(ans->mat, self->mat);
+
+    ans->shape = get_shape(ans->mat->rows, ans->mat->cols);
 
     PyObject *res = (PyObject *)ans;
 
@@ -513,14 +518,17 @@ PyObject *Matrixox_pow(Matrixox *self, PyObject *pow, PyObject *optional)
     {
         return NULL;
     }
-    allocate_matrix(&ans->mat, self->mat->rows, self->mat->cols);
+    allocate_matrix_raw(&ans->mat, self->mat->rows, self->mat->cols);
 
     int p = (int)PyLong_AsLong(pow);
     if (pow_matrix(ans->mat, self->mat, p) == -1)
     {
         PyErr_SetString(PyExc_ValueError, "the matrix must be squre and the pow can't be less than 0");
+        Py_DECREF(ans);
         return NULL;
     }
+
+    ans->shape = get_shape(ans->mat->rows, ans->mat->cols);
 
     PyObject *res = (PyObject *)ans;
 
@@ -538,6 +546,7 @@ PyNumberMethods Matrixox_as_number = {
     .nb_absolute = (unaryfunc)Matrixox_abs,
     .nb_negative = (unaryfunc)Matrixox_neg,
     .nb_power = (ternaryfunc)Matrixox_pow,
+    .nb_matrix_multiply = (binaryfunc)Matrixox_multiply,
 };
 
 /* INSTANCE METHODS */
@@ -624,6 +633,7 @@ PyObject *Matrixox_get_value(Matrixox *self, PyObject *args)
 PyMethodDef Matrixox_methods[] = {
     {"get", (PyCFunction)Matrixox_get_value, METH_VARARGS, "Gets a value from the matrix at (row, col)"},
     {"set", (PyCFunction)Matrixox_set_value, METH_VARARGS, "Sets a value in the matrix at (row, col, val)"},
+    {"to_list", (PyCFunction)Matrixox_to_list, METH_NOARGS, "Return a list representation of numox.Matrix"},
     {NULL, NULL, 0, NULL}};
 
 /* INDEXING */
@@ -805,6 +815,8 @@ PyObject *Matrixox_subscript(Matrixox *self, PyObject *key)
                     return NULL;
                 }
 
+                result->shape = get_shape(result->mat->rows, result->mat->cols);
+
                 return (PyObject *)result;
             }
 
@@ -833,6 +845,8 @@ PyObject *Matrixox_subscript(Matrixox *self, PyObject *key)
                     Py_DECREF(result);
                     return NULL;
                 }
+
+                result->shape = get_shape(result->mat->rows, result->mat->cols);
 
                 return (PyObject *)result;
             }
@@ -900,10 +914,7 @@ PyObject *Matrixox_subscript(Matrixox *self, PyObject *key)
  */
 int Matrixox_set_subscript(Matrixox *self, PyObject *key, PyObject *v)
 {
-    if (!PyLong_Check(v) || !PyFloat_AS_DOUBLE(v))
-    {
-        PyErr_SetString(PyExc_TypeError, "value should be an int or float");
-    }
+
     if (self->mat->is_1d)
     {
         if (PyLong_Check(key))
@@ -911,17 +922,26 @@ int Matrixox_set_subscript(Matrixox *self, PyObject *key, PyObject *v)
             int idx = PyLong_AS_LONG(key);
             int len = self->mat->rows == 1 ? self->mat->cols : self->mat->rows;
 
-            if (idx < 0 || idx > len)
+            if (idx < 0 || idx >= len)
             {
                 PyErr_SetString(PyExc_IndexError, "Index out of range");
                 return -1;
             }
-            if (!PyLong_Check(v) && !PyFloat_Check(v))
+            double val;
+            if (PyFloat_Check(v))
             {
-                PyErr_SetString(PyExc_IndexError, "Value must be an in or float");
+                val = PyFloat_AS_DOUBLE(v);
+            }
+            else if (PyLong_Check(v))
+            {
+                val = (double)PyLong_AsLong(v);
+            }
+            else
+            {
+                PyErr_SetString(PyExc_TypeError, "value should be an int or float");
+                return -1;
             }
 
-            double val = PyFloat_AS_DOUBLE(v);
             if (self->mat->rows == 1)
             {
                 set(self->mat, 0, idx, val);
@@ -930,6 +950,7 @@ int Matrixox_set_subscript(Matrixox *self, PyObject *key, PyObject *v)
             {
                 set(self->mat, idx, 0, val);
             }
+            return 0;
         }
         else if (PySlice_Check(key))
         {

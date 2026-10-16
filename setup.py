@@ -12,7 +12,7 @@ def main():
         LDFLAGS = ['-lomp', '-flto']
     else:
         # Linux
-        CFLAGS = ['-Wall', '-std=c99', '-fopenmp', '-march=native', '-ffast-math', '-flto', '-pthread', '-O3']
+        CFLAGS = ['-Wall', '-std=c99', '-fopenmp', '-mavx2', '-mfma', '-ffast-math', '-flto', '-pthread', '-O3']
         LDFLAGS = ['-fopenmp', '-flto']
 
     numox_module = Extension('numox',

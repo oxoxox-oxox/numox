@@ -23,7 +23,7 @@ jobs:
         env:
           # 跳过太老的 Python 版本和 PyPy 虚拟机，加快编译速度
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          CIBW_SKIP: "cp36-* cp37-* pp*"
+          CIBW_SKIP: "cp36-* cp37-* pp* *-win32 *i686"
 
       - name: Upload wheel artifacts
         uses: actions/upload-artifact@v4
