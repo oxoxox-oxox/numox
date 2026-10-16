@@ -440,8 +440,7 @@ PyObject *Matrixox_multiply(Matrixox *self, PyObject *args)
 
     Matrixox *other = (Matrixox *)args;
 
-    if (self->mat->rows != other->mat->rows ||
-        self->mat->cols != other->mat->cols)
+    if (self->mat->rows != other->mat->cols)
     {
         PyErr_SetString(PyExc_ValueError, "Matrix dimention do not match");
         return NULL;
@@ -453,10 +452,13 @@ PyObject *Matrixox_multiply(Matrixox *self, PyObject *args)
         return NULL;
     }
 
-    allocate_matrix(&ans->mat, self->mat->rows, self->mat->cols);
-    mul_matrix(ans->mat, other->mat, self->mat);
+    allocate_matrix_raw(&ans->mat, self->mat->rows, self->mat->cols);
 
-    ans->shape = get_shape(ans->mat->rows, ans->mat->cols);
+    Py_BEGIN_ALLOW_THREADS
+        mul_matrix(ans->mat, self->mat, other->mat);
+    Py_END_ALLOW_THREADS
+
+        ans->shape = get_shape(ans->mat->rows, ans->mat->cols);
 
     PyObject *res = (PyObject *)ans;
 

@@ -4,16 +4,16 @@ import sys
 def main():
     # 根据操作系统动态分配编译参数
     if sys.platform == 'win32':
-        CFLAGS = ['/openmp:llvm', '/O2', '/arch:AVX']
-        LDFLAGS = []
+        CFLAGS = ['/openmp:llvm', '/O2', '/arch:AVX2', '/fp:fast', '/GL']
+        LDFLAGS = ['/LTCG']
     elif sys.platform == 'darwin':
         # Mac OS
-        CFLAGS = ['-g', '-Wall', '-std=c99', '-Xpreprocessor', '-fopenmp', '-mavx', '-mfma', '-pthread', '-O3']
-        LDFLAGS = ['-lomp']
+        CFLAGS = ['-O3', '-Wall', '-std=c99', '-Xpreprocessor', '-fopenmp', '-mavx2', '-mfma', '-ffast-math', '-flto']
+        LDFLAGS = ['-lomp', '-flto']
     else:
         # Linux
-        CFLAGS = ['-g', '-Wall', '-std=c99', '-fopenmp', '-mavx', '-mfma', '-pthread', '-O3']
-        LDFLAGS = ['-fopenmp']
+        CFLAGS = ['-Wall', '-std=c99', '-fopenmp', '-march=native', '-ffast-math', '-flto', '-pthread', '-O3']
+        LDFLAGS = ['-fopenmp', '-flto']
 
     numox_module = Extension('numox',
                             sources=['numox.c', 'matrix.c'],

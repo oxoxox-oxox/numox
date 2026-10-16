@@ -5,3 +5,4 @@ test.py
 /build
 /numox.egg-info
 numox.cpython*
+numox.cp*
