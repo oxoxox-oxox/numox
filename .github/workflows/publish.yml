@@ -22,6 +22,7 @@ jobs:
         uses: pypa/cibuildwheel@v4.3.0
         env:
           # 跳过太老的 Python 版本和 PyPy 虚拟机，加快编译速度
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           CIBW_SKIP: "cp36-* cp37-* pp*"
 
       - name: Upload wheel artifacts
