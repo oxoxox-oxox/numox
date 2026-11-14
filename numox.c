@@ -12,12 +12,49 @@ PyObject *get_shape(int rows, int cols)
 {
     if (rows == 1 || cols == 1)
     {
-        return PyTuple_Pack(1, PyLong_FromLong(rows * cols));
+        PyObject *dim = PyLong_FromLong((long)rows * (long)cols);
+        if (!dim)
+            return NULL;
+        PyObject *tup = PyTuple_Pack(1, dim);
+        Py_DECREF(dim);
+        return tup;
     }
     else
     {
-        return PyTuple_Pack(2, PyLong_FromLong(rows), PyLong_FromLong(cols));
+        PyObject *r = PyLong_FromLong(rows);
+        PyObject *c = PyLong_FromLong(cols);
+        if (!r || !c)
+        {
+            Py_XDECREF(r);
+            Py_XDECREF(c);
+            return NULL;
+        }
+        PyObject *tup = PyTuple_Pack(2, r, c);
+        Py_DECREF(r);
+        Py_DECREF(c);
+        return tup;
     }
+}
+
+static int py_to_double(PyObject *obj, double *out)
+{
+    if (PyFloat_Check(obj))
+    {
+        *out = PyFloat_AS_DOUBLE(obj);
+        return 0;
+    }
+    if (PyLong_Check(obj))
+    {
+        double val = PyLong_AsDouble(obj);
+        if (val == -1.0 && PyErr_Occurred())
+        {
+            return -1;
+        }
+        *out = val;
+        return 0;
+    }
+    PyErr_SetString(PyExc_TypeError, "Matrix elements must be int or float");
+    return -1;
 }
 /*
  * Matrix(rows, cols, low, high). Fill a matrix random double values
@@ -25,13 +62,28 @@ PyObject *get_shape(int rows, int cols)
 int init_rand(PyObject *self, int rows, int cols, unsigned int seed, double low,
               double high)
 {
-    matrix *new_mat;
-    int alloc_failed = allocate_matrix(&new_mat, rows, cols);
-    if (alloc_failed)
-        return alloc_failed;
-    rand_matrix(new_mat, seed, low, high);
+    if (rows <= 0 || cols <= 0)
+    {
+        PyErr_SetString(PyExc_ValueError, "Matrix dimensions must be positive");
+        return -1;
+    }
+    matrix *new_mat = NULL;
+    if (allocate_matrix(&new_mat, rows, cols) != 0)
+    {
+        PyErr_NoMemory();
+        return -1;
+    }
+    Py_BEGIN_ALLOW_THREADS
+        rand_matrix(new_mat, seed, low, high);
+    Py_END_ALLOW_THREADS
+    PyObject *shape = get_shape(new_mat->rows, new_mat->cols);
+    if (!shape)
+    {
+        deallocate_matrix(new_mat);
+        return -1;
+    }
     ((Matrixox *)self)->mat = new_mat;
-    ((Matrixox *)self)->shape = get_shape(new_mat->rows, new_mat->cols);
+    ((Matrixox *)self)->shape = shape;
     return 0;
 }
 
@@ -40,16 +92,28 @@ int init_rand(PyObject *self, int rows, int cols, unsigned int seed, double low,
  */
 int init_fill(PyObject *self, int rows, int cols, double val)
 {
-    matrix *new_mat;
-    int alloc_failed = allocate_matrix_raw(&new_mat, rows, cols);
-    if (alloc_failed)
-        return alloc_failed;
-    else
+    if (rows <= 0 || cols <= 0)
     {
-        fill_matrix(new_mat, val);
-        ((Matrixox *)self)->mat = new_mat;
-        ((Matrixox *)self)->shape = get_shape(new_mat->rows, new_mat->cols);
+        PyErr_SetString(PyExc_ValueError, "Matrix dimensions must be positive");
+        return -1;
     }
+    matrix *new_mat = NULL;
+    if (allocate_matrix_raw(&new_mat, rows, cols) != 0)
+    {
+        PyErr_NoMemory();
+        return -1;
+    }
+    Py_BEGIN_ALLOW_THREADS
+        fill_matrix(new_mat, val);
+    Py_END_ALLOW_THREADS
+    PyObject *shape = get_shape(new_mat->rows, new_mat->cols);
+    if (!shape)
+    {
+        deallocate_matrix(new_mat);
+        return -1;
+    }
+    ((Matrixox *)self)->mat = new_mat;
+    ((Matrixox *)self)->shape = shape;
     return 0;
 }
 
@@ -58,26 +122,45 @@ int init_fill(PyObject *self, int rows, int cols, double val)
  */
 int init_1d(PyObject *self, int rows, int cols, PyObject *lst)
 {
-    if (rows * cols != PyList_Size(lst))
+    if (rows <= 0 || cols <= 0)
+    {
+        PyErr_SetString(PyExc_ValueError, "Matrix dimensions must be positive");
+        return -1;
+    }
+    if ((Py_ssize_t)rows * (Py_ssize_t)cols != PyList_Size(lst))
     {
         PyErr_SetString(PyExc_ValueError, "Incorrect number of elements in list");
         return -1;
     }
-    matrix *new_mat;
-    int alloc_failed = allocate_matrix(&new_mat, rows, cols);
-    if (alloc_failed)
-        return alloc_failed;
-    int count = 0;
+    matrix *new_mat = NULL;
+    if (allocate_matrix_raw(&new_mat, rows, cols) != 0)
+    {
+        PyErr_NoMemory();
+        return -1;
+    }
+    Py_ssize_t count = 0;
     for (int i = 0; i < rows; i++)
     {
         for (int j = 0; j < cols; j++)
         {
-            set(new_mat, i, j, PyFloat_AsDouble(PyList_GetItem(lst, count)));
+            double val;
+            if (py_to_double(PyList_GET_ITEM(lst, count), &val) != 0)
+            {
+                deallocate_matrix(new_mat);
+                return -1;
+            }
+            set(new_mat, i, j, val);
             count++;
         }
     }
+    PyObject *shape = get_shape(new_mat->rows, new_mat->cols);
+    if (!shape)
+    {
+        deallocate_matrix(new_mat);
+        return -1;
+    }
     ((Matrixox *)self)->mat = new_mat;
-    ((Matrixox *)self)->shape = get_shape(new_mat->rows, new_mat->cols);
+    ((Matrixox *)self)->shape = shape;
     return 0;
 }
 
@@ -86,46 +169,64 @@ int init_1d(PyObject *self, int rows, int cols, PyObject *lst)
  */
 int init_2d(PyObject *self, PyObject *lst)
 {
-    int rows = PyList_Size(lst);
-    if (rows == 0)
+    Py_ssize_t rows_sz = PyList_Size(lst);
+    if (rows_sz <= 0)
     {
         PyErr_SetString(PyExc_ValueError,
                         "Cannot initialize numox.Matrix with an empty list");
         return -1;
     }
-    int cols;
-    if (!PyList_Check(PyList_GetItem(lst, 0)))
+    PyObject *first_row = PyList_GET_ITEM(lst, 0);
+    if (!PyList_Check(first_row))
     {
         PyErr_SetString(PyExc_ValueError, "List values not valid");
         return -1;
     }
-    else
+    Py_ssize_t cols_sz = PyList_Size(first_row);
+    if (cols_sz <= 0)
     {
-        cols = PyList_Size(PyList_GetItem(lst, 0));
+        PyErr_SetString(PyExc_ValueError, "List values not valid");
+        return -1;
     }
+    int rows = (int)rows_sz;
+    int cols = (int)cols_sz;
     for (int i = 0; i < rows; i++)
     {
-        if (!PyList_Check(PyList_GetItem(lst, i)) ||
-            PyList_Size(PyList_GetItem(lst, i)) != cols)
+        PyObject *row_obj = PyList_GET_ITEM(lst, i);
+        if (!PyList_Check(row_obj) || PyList_Size(row_obj) != cols_sz)
         {
             PyErr_SetString(PyExc_ValueError, "List values not valid");
             return -1;
         }
     }
-    matrix *new_mat;
-    int alloc_failed = allocate_matrix(&new_mat, rows, cols);
-    if (alloc_failed)
-        return alloc_failed;
+    matrix *new_mat = NULL;
+    if (allocate_matrix_raw(&new_mat, rows, cols) != 0)
+    {
+        PyErr_NoMemory();
+        return -1;
+    }
     for (int i = 0; i < rows; i++)
     {
+        PyObject *row_obj = PyList_GET_ITEM(lst, i);
         for (int j = 0; j < cols; j++)
         {
-            set(new_mat, i, j,
-                PyFloat_AsDouble(PyList_GetItem(PyList_GetItem(lst, i), j)));
+            double val;
+            if (py_to_double(PyList_GET_ITEM(row_obj, j), &val) != 0)
+            {
+                deallocate_matrix(new_mat);
+                return -1;
+            }
+            set(new_mat, i, j, val);
         }
     }
+    PyObject *shape = get_shape(new_mat->rows, new_mat->cols);
+    if (!shape)
+    {
+        deallocate_matrix(new_mat);
+        return -1;
+    }
     ((Matrixox *)self)->mat = new_mat;
-    ((Matrixox *)self)->shape = get_shape(new_mat->rows, new_mat->cols);
+    ((Matrixox *)self)->shape = shape;
     return 0;
 }
 
@@ -153,21 +254,19 @@ PyObject *Matrixox_new(PyTypeObject *type, PyObject *args,
  */
 int Matrixox_init(PyObject *self, PyObject *args, PyObject *kwds)
 {
+    Matrixox *m = (Matrixox *)self;
+    if (m->mat != NULL)
+    {
+        deallocate_matrix(m->mat);
+        m->mat = NULL;
+    }
+    Py_CLEAR(m->shape);
+
     /* Generate random matrices */
-    if (kwds != NULL)
+    if (kwds != NULL && PyDict_Size(kwds) > 0)
     {
         PyObject *rand = PyDict_GetItemString(kwds, "rand");
-        if (!rand)
-        {
-            PyErr_SetString(PyExc_TypeError, "Invalid arguments");
-            return -1;
-        }
-        if (!PyBool_Check(rand))
-        {
-            PyErr_SetString(PyExc_TypeError, "Invalid arguments");
-            return -1;
-        }
-        if (rand != Py_True)
+        if (!rand || !PyBool_Check(rand) || rand != Py_True)
         {
             PyErr_SetString(PyExc_TypeError, "Invalid arguments");
             return -1;
@@ -176,64 +275,48 @@ int Matrixox_init(PyObject *self, PyObject *args, PyObject *kwds)
         PyObject *low = PyDict_GetItemString(kwds, "low");
         PyObject *high = PyDict_GetItemString(kwds, "high");
         PyObject *seed = PyDict_GetItemString(kwds, "seed");
-        double double_low = 0;
-        double double_high = 1;
+        double double_low = 0.0;
+        double double_high = 1.0;
         unsigned int unsigned_seed = 0;
 
-        if (low)
+        if (low && py_to_double(low, &double_low) != 0)
         {
-            if (PyFloat_Check(low))
-            {
-                double_low = PyFloat_AsDouble(low);
-            }
-            else if (PyLong_Check(low))
-            {
-                double_low = PyLong_AsLong(low);
-            }
+            return -1;
         }
-
-        if (high)
+        if (high && py_to_double(high, &double_high) != 0)
         {
-            if (PyFloat_Check(high))
-            {
-                double_high = PyFloat_AsDouble(high);
-            }
-            else if (PyLong_Check(high))
-            {
-                double_high = PyLong_AsLong(high);
-            }
+            return -1;
         }
 
         if (double_low >= double_high)
         {
-            PyErr_SetString(PyExc_TypeError, "Invalid arguments");
+            PyErr_SetString(PyExc_ValueError, "Invalid arguments: low must be less than high");
             return -1;
         }
 
-        // Set seed if argument exists
         if (seed)
         {
-            if (PyLong_Check(seed))
+            if (!PyLong_Check(seed))
             {
-                unsigned_seed = PyLong_AsUnsignedLong(seed);
+                PyErr_SetString(PyExc_TypeError, "seed must be an integer");
+                return -1;
             }
+            unsigned_seed = (unsigned int)PyLong_AsUnsignedLongMask(seed);
         }
 
         PyObject *rows = NULL;
         PyObject *cols = NULL;
-        if (PyArg_UnpackTuple(args, "args", 2, 2, &rows, &cols))
+        if (!PyArg_UnpackTuple(args, "Matrix", 2, 2, &rows, &cols))
         {
-            if (rows && cols && PyLong_Check(rows) && PyLong_Check(cols))
-            {
-                return init_rand(self, PyLong_AsLong(rows), PyLong_AsLong(cols), unsigned_seed, double_low,
-                                 double_high);
-            }
-        }
-        else
-        {
-            PyErr_SetString(PyExc_TypeError, "Invalid arguments");
             return -1;
         }
+        if (PyLong_Check(rows) && PyLong_Check(cols))
+        {
+            return init_rand(self, (int)PyLong_AsLong(rows), (int)PyLong_AsLong(cols),
+                             unsigned_seed, double_low, double_high);
+        }
+        PyErr_SetString(PyExc_TypeError, "Invalid arguments");
+        return -1;
     }
     PyObject *arg1 = NULL;
     PyObject *arg2 = NULL;
@@ -348,7 +431,38 @@ PyMethodDef Matrixox_class_methods[] = {
 PyObject *Matrixox_repr(PyObject *self)
 {
     PyObject *py_lst = Matrixox_to_list((Matrixox *)self);
-    return PyObject_Repr(py_lst);
+    if (!py_lst)
+    {
+        return NULL;
+    }
+    PyObject *res = PyObject_Repr(py_lst);
+    Py_DECREF(py_lst);
+    return res;
+}
+
+/* Helper to allocate a Matrixox object and its underlying raw matrix + shape */
+static Matrixox *create_matrixox(int rows, int cols)
+{
+    Matrixox *ans = (Matrixox *)MatrixoxType.tp_alloc(&MatrixoxType, 0);
+    if (!ans)
+    {
+        return NULL;
+    }
+    ans->mat = NULL;
+    ans->shape = NULL;
+    if (allocate_matrix_raw(&ans->mat, rows, cols) != 0)
+    {
+        Py_DECREF(ans);
+        PyErr_NoMemory();
+        return NULL;
+    }
+    ans->shape = get_shape(rows, cols);
+    if (!ans->shape)
+    {
+        Py_DECREF(ans);
+        return NULL;
+    }
+    return ans;
 }
 
 /* NUMBER METHODS */
@@ -361,7 +475,7 @@ PyObject *Matrixox_add(Matrixox *self, PyObject *args)
 {
     if (!PyObject_TypeCheck(args, &MatrixoxType))
     {
-        PyErr_SetString(PyExc_ValueError, "Matrix dimentions do not match");
+        PyErr_SetString(PyExc_TypeError, "Operand must be a numox.Matrix");
         return NULL;
     }
 
@@ -370,24 +484,29 @@ PyObject *Matrixox_add(Matrixox *self, PyObject *args)
     if (self->mat->rows != other->mat->rows ||
         self->mat->cols != other->mat->cols)
     {
-        PyErr_SetString(PyExc_ValueError, "Matrix dimention do not match");
+        PyErr_SetString(PyExc_ValueError, "Matrix dimensions do not match");
         return NULL;
     }
 
-    Matrixox *ans = (Matrixox *)MatrixoxType.tp_alloc(&MatrixoxType, 0);
+    Matrixox *ans = create_matrixox(self->mat->rows, self->mat->cols);
     if (!ans)
     {
         return NULL;
     }
 
-    allocate_matrix_raw(&ans->mat, self->mat->rows, self->mat->cols);
-    add_matrix(ans->mat, other->mat, self->mat);
+    int err;
+    Py_BEGIN_ALLOW_THREADS
+        err = add_matrix(ans->mat, self->mat, other->mat);
+    Py_END_ALLOW_THREADS
 
-    ans->shape = get_shape(ans->mat->rows, ans->mat->cols);
+    if (err != 0)
+    {
+        Py_DECREF(ans);
+        PyErr_SetString(PyExc_RuntimeError, "Matrix addition failed");
+        return NULL;
+    }
 
-    PyObject *res = (PyObject *)ans;
-
-    return res;
+    return (PyObject *)ans;
 }
 
 /*
@@ -398,7 +517,7 @@ PyObject *Matrixox_sub(Matrixox *self, PyObject *args)
 {
     if (!PyObject_TypeCheck(args, &MatrixoxType))
     {
-        PyErr_SetString(PyExc_ValueError, "Matrix dimentions do not match");
+        PyErr_SetString(PyExc_TypeError, "Operand must be a numox.Matrix");
         return NULL;
     }
 
@@ -407,24 +526,29 @@ PyObject *Matrixox_sub(Matrixox *self, PyObject *args)
     if (self->mat->rows != other->mat->rows ||
         self->mat->cols != other->mat->cols)
     {
-        PyErr_SetString(PyExc_ValueError, "Matrix dimention do not match");
+        PyErr_SetString(PyExc_ValueError, "Matrix dimensions do not match");
         return NULL;
     }
 
-    Matrixox *ans = (Matrixox *)MatrixoxType.tp_alloc(&MatrixoxType, 0);
+    Matrixox *ans = create_matrixox(self->mat->rows, self->mat->cols);
     if (!ans)
     {
         return NULL;
     }
 
-    allocate_matrix_raw(&ans->mat, self->mat->rows, self->mat->cols);
-    sub_matrix(ans->mat, self->mat, other->mat);
+    int err;
+    Py_BEGIN_ALLOW_THREADS
+        err = sub_matrix(ans->mat, self->mat, other->mat);
+    Py_END_ALLOW_THREADS
 
-    ans->shape = get_shape(ans->mat->rows, ans->mat->cols);
+    if (err != 0)
+    {
+        Py_DECREF(ans);
+        PyErr_SetString(PyExc_RuntimeError, "Matrix subtraction failed");
+        return NULL;
+    }
 
-    PyObject *res = (PyObject *)ans;
-
-    return res;
+    return (PyObject *)ans;
 }
 
 /*
@@ -435,7 +559,7 @@ PyObject *Matrixox_multiply(Matrixox *self, PyObject *args)
 {
     if (!PyObject_TypeCheck(args, &MatrixoxType))
     {
-        PyErr_SetString(PyExc_ValueError, "Matrix dimentions do not match");
+        PyErr_SetString(PyExc_TypeError, "Operand must be a numox.Matrix");
         return NULL;
     }
 
@@ -443,27 +567,29 @@ PyObject *Matrixox_multiply(Matrixox *self, PyObject *args)
 
     if (self->mat->cols != other->mat->rows)
     {
-        PyErr_SetString(PyExc_ValueError, "Matrix dimention do not match");
+        PyErr_SetString(PyExc_ValueError, "Matrix dimensions do not match");
         return NULL;
     }
 
-    Matrixox *ans = (Matrixox *)MatrixoxType.tp_alloc(&MatrixoxType, 0);
+    Matrixox *ans = create_matrixox(self->mat->rows, other->mat->cols);
     if (!ans)
     {
         return NULL;
     }
 
-    allocate_matrix_raw(&ans->mat, self->mat->rows, other->mat->cols);
-
+    int err;
     Py_BEGIN_ALLOW_THREADS
-        mul_matrix(ans->mat, self->mat, other->mat);
+        err = mul_matrix(ans->mat, self->mat, other->mat);
     Py_END_ALLOW_THREADS
 
-        ans->shape = get_shape(ans->mat->rows, ans->mat->cols);
+    if (err != 0)
+    {
+        Py_DECREF(ans);
+        PyErr_NoMemory();
+        return NULL;
+    }
 
-    PyObject *res = (PyObject *)ans;
-
-    return res;
+    return (PyObject *)ans;
 }
 
 /*
@@ -471,20 +597,25 @@ PyObject *Matrixox_multiply(Matrixox *self, PyObject *args)
  */
 PyObject *Matrixox_neg(Matrixox *self)
 {
-    Matrixox *ans = (Matrixox *)MatrixoxType.tp_alloc(&MatrixoxType, 0);
+    Matrixox *ans = create_matrixox(self->mat->rows, self->mat->cols);
     if (!ans)
     {
         return NULL;
     }
-    allocate_matrix_raw(&ans->mat, self->mat->rows, self->mat->cols);
 
-    neg_matrix(ans->mat, self->mat);
+    int err;
+    Py_BEGIN_ALLOW_THREADS
+        err = neg_matrix(ans->mat, self->mat);
+    Py_END_ALLOW_THREADS
 
-    ans->shape = get_shape(ans->mat->rows, ans->mat->cols);
+    if (err != 0)
+    {
+        Py_DECREF(ans);
+        PyErr_SetString(PyExc_RuntimeError, "Matrix negation failed");
+        return NULL;
+    }
 
-    PyObject *res = (PyObject *)ans;
-
-    return res;
+    return (PyObject *)ans;
 }
 
 /*
@@ -492,20 +623,25 @@ PyObject *Matrixox_neg(Matrixox *self)
  */
 PyObject *Matrixox_abs(Matrixox *self)
 {
-    Matrixox *ans = (Matrixox *)MatrixoxType.tp_alloc(&MatrixoxType, 0);
+    Matrixox *ans = create_matrixox(self->mat->rows, self->mat->cols);
     if (!ans)
     {
         return NULL;
     }
-    allocate_matrix_raw(&ans->mat, self->mat->rows, self->mat->cols);
 
-    abs_matrix(ans->mat, self->mat);
+    int err;
+    Py_BEGIN_ALLOW_THREADS
+        err = abs_matrix(ans->mat, self->mat);
+    Py_END_ALLOW_THREADS
 
-    ans->shape = get_shape(ans->mat->rows, ans->mat->cols);
+    if (err != 0)
+    {
+        Py_DECREF(ans);
+        PyErr_SetString(PyExc_RuntimeError, "Matrix abs failed");
+        return NULL;
+    }
 
-    PyObject *res = (PyObject *)ans;
-
-    return res;
+    return (PyObject *)ans;
 }
 
 /*
@@ -513,26 +649,46 @@ PyObject *Matrixox_abs(Matrixox *self)
  */
 PyObject *Matrixox_pow(Matrixox *self, PyObject *pow, PyObject *optional)
 {
-    Matrixox *ans = (Matrixox *)MatrixoxType.tp_alloc(&MatrixoxType, 0);
+    if (optional != Py_None)
+    {
+        PyErr_SetString(PyExc_TypeError, "3-argument pow() is not supported");
+        return NULL;
+    }
+    if (!PyLong_Check(pow))
+    {
+        PyErr_SetString(PyExc_TypeError, "Exponent must be an integer");
+        return NULL;
+    }
+    long p = PyLong_AsLong(pow);
+    if (p == -1 && PyErr_Occurred())
+    {
+        return NULL;
+    }
+    if (self->mat->rows != self->mat->cols || p < 0 || p > INT_MAX)
+    {
+        PyErr_SetString(PyExc_ValueError, "Matrix must be square and exponent must be a non-negative int");
+        return NULL;
+    }
+
+    Matrixox *ans = create_matrixox(self->mat->rows, self->mat->cols);
     if (!ans)
     {
         return NULL;
     }
-    allocate_matrix_raw(&ans->mat, self->mat->rows, self->mat->cols);
 
-    int p = (int)PyLong_AsLong(pow);
-    if (pow_matrix(ans->mat, self->mat, p) == -1)
+    int err;
+    Py_BEGIN_ALLOW_THREADS
+        err = pow_matrix(ans->mat, self->mat, (int)p);
+    Py_END_ALLOW_THREADS
+
+    if (err != 0)
     {
-        PyErr_SetString(PyExc_ValueError, "the matrix must be squre and the pow can't be less than 0");
         Py_DECREF(ans);
+        PyErr_NoMemory();
         return NULL;
     }
 
-    ans->shape = get_shape(ans->mat->rows, ans->mat->cols);
-
-    PyObject *res = (PyObject *)ans;
-
-    return res;
+    return (PyObject *)ans;
 }
 
 /*
@@ -636,7 +792,74 @@ PyMethodDef Matrixox_methods[] = {
     {"to_list", (PyCFunction)Matrixox_to_list, METH_NOARGS, "Return a list representation of numox.Matrix"},
     {NULL, NULL, 0, NULL}};
 
-/* INDEXING */
+/* INDEXING HELPERS */
+
+static int parse_int_index(PyObject *key, int len, int *out_idx)
+{
+    if (!PyLong_Check(key))
+    {
+        PyErr_SetString(PyExc_TypeError, "Index must be an integer");
+        return -1;
+    }
+    long idx = PyLong_AsLong(key);
+    if (idx == -1 && PyErr_Occurred())
+    {
+        return -1;
+    }
+    if (idx < 0 || idx >= len)
+    {
+        PyErr_SetString(PyExc_IndexError, "Index out of range");
+        return -1;
+    }
+    *out_idx = (int)idx;
+    return 0;
+}
+
+static int parse_slice_step1(PyObject *slice_obj, Py_ssize_t len, Py_ssize_t *start, Py_ssize_t *slicelength)
+{
+    Py_ssize_t stop = 0, step = 0;
+    if (PySlice_GetIndicesEx(slice_obj, len, start, &stop, &step, slicelength) < 0)
+    {
+        return -1;
+    }
+    if (step != 1)
+    {
+        PyErr_SetString(PyExc_ValueError, "Slice step must be 1");
+        return -1;
+    }
+    if (*slicelength < 1)
+    {
+        PyErr_SetString(PyExc_ValueError, "Slice cannot result in empty dimension");
+        return -1;
+    }
+    return 0;
+}
+
+static PyObject *create_matrixox_ref(matrix *from, int row_offset, int col_offset, int rows, int cols)
+{
+    Matrixox *result = (Matrixox *)MatrixoxType.tp_alloc(&MatrixoxType, 0);
+    if (!result)
+    {
+        return NULL;
+    }
+    result->mat = NULL;
+    result->shape = NULL;
+
+    if (allocate_matrix_ref(&(result->mat), from, row_offset, col_offset, rows, cols) != 0)
+    {
+        Py_DECREF(result);
+        PyErr_SetString(PyExc_ValueError, "Failed to create matrix slice");
+        return NULL;
+    }
+
+    result->shape = get_shape(result->mat->rows, result->mat->cols);
+    if (!result->shape)
+    {
+        Py_DECREF(result);
+        return NULL;
+    }
+    return (PyObject *)result;
+}
 
 /*
  * Given a numox.Matrix `self`, index into it with `key`. Return the indexed result.
@@ -649,58 +872,27 @@ PyObject *Matrixox_subscript(Matrixox *self, PyObject *key)
 
         if (PyLong_Check(key))
         {
-            int num = PyLong_AS_LONG(key);
-
-            if (num < 0 || num >= len)
+            int num = 0;
+            if (parse_int_index(key, len, &num) != 0)
             {
-                PyErr_SetString(PyExc_IndexError, "Index out of range");
                 return NULL;
             }
-            double val = (self->mat->rows == 1) ? self->mat->data[num] : self->mat->data[num * self->mat->stride + 0];
+            double val = (self->mat->rows == 1) ? get(self->mat, 0, num) : get(self->mat, num, 0);
             return PyFloat_FromDouble(val);
         }
 
         if (PySlice_Check(key))
         {
-            Py_ssize_t start = 0, stop = 0, step = 0, slicelength = 0;
-            if (PySlice_GetIndicesEx(key, self->mat->rows, &start, &stop, &step, &slicelength) < 0)
+            Py_ssize_t start = 0, slicelength = 0;
+            if (parse_slice_step1(key, len, &start, &slicelength) != 0)
             {
                 return NULL;
             }
-
-            if (step != 1)
-            {
-                PyErr_SetString(PyExc_ValueError, "Slice step must be 1");
-                return NULL;
-            }
-
-            if (slicelength < 1)
-            {
-                PyErr_SetString(PyExc_ValueError, "Slice cannot result in empty dimension");
-                return NULL;
-            }
-
-            Matrixox *result = (Matrixox *)MatrixoxType.tp_alloc(&MatrixoxType, 0);
-            if (!result)
-            {
-                return NULL;
-            }
-
-            int row_offset = (self->mat->rows == 1) ? 0 : start;
-            int col_offset = (self->mat->rows == 1) ? start : 0;
-            int new_rows = (self->mat->rows == 1) ? 1 : slicelength;
-            int new_cols = (self->mat->rows == 1) ? slicelength : 1;
-
-            int err = allocate_matrix_ref(&(result->mat), self->mat, row_offset, col_offset, new_rows, new_cols);
-
-            if (err != 0)
-            {
-                Py_DECREF(result);
-                return NULL;
-            }
-
-            result->shape = get_shape(result->mat->rows, result->mat->cols);
-            return (PyObject *)result;
+            int row_offset = (self->mat->rows == 1) ? 0 : (int)start;
+            int col_offset = (self->mat->rows == 1) ? (int)start : 0;
+            int new_rows = (self->mat->rows == 1) ? 1 : (int)slicelength;
+            int new_cols = (self->mat->rows == 1) ? (int)slicelength : 1;
+            return create_matrixox_ref(self->mat, row_offset, col_offset, new_rows, new_cols);
         }
 
         PyErr_SetString(PyExc_TypeError, "Invalid index type");
@@ -713,61 +905,21 @@ PyObject *Matrixox_subscript(Matrixox *self, PyObject *key)
 
         if (PyLong_Check(key))
         {
-            int num = PyLong_AS_LONG(key);
-
-            if (num < 0 || num >= row_len)
+            int num = 0;
+            if (parse_int_index(key, row_len, &num) != 0)
             {
-                PyErr_SetString(PyExc_IndexError, "Index out of range");
                 return NULL;
             }
-            Matrixox *val = (Matrixox *)MatrixoxType.tp_alloc(&MatrixoxType, 0);
-
-            int err = allocate_matrix_ref(&(val->mat), self->mat, num, 0, 1, self->mat->cols);
-
-            if (err != 0)
-            {
-                Py_DECREF(val);
-                return NULL;
-            }
-
-            val->shape = get_shape(val->mat->rows, val->mat->cols);
-            return (PyObject *)val;
+            return create_matrixox_ref(self->mat, num, 0, 1, col_len);
         }
         if (PySlice_Check(key))
         {
-            Py_ssize_t start = 0, stop = 0, step = 0, slicelength = 0;
-
-            if (PySlice_GetIndicesEx(key, row_len, &start, &stop, &step, &slicelength) < 0)
+            Py_ssize_t start = 0, slicelength = 0;
+            if (parse_slice_step1(key, row_len, &start, &slicelength) != 0)
             {
                 return NULL;
             }
-            if (step != 1)
-            {
-                PyErr_SetString(PyExc_ValueError, "Slice step must be 1");
-                return NULL;
-            }
-            if (slicelength < 1)
-            {
-                PyErr_SetString(PyExc_ValueError, "Slice cannot result in empty dimension");
-                return NULL;
-            }
-
-            Matrixox *result = (Matrixox *)MatrixoxType.tp_alloc(&MatrixoxType, 0);
-            if (!result)
-            {
-                return NULL;
-            }
-
-            int err = allocate_matrix_ref(&(result->mat), self->mat, start, 0, slicelength, col_len);
-
-            if (err != 0)
-            {
-                Py_DECREF(result);
-                return NULL;
-            }
-
-            result->shape = get_shape(result->mat->rows, result->mat->cols);
-            return (PyObject *)result;
+            return create_matrixox_ref(self->mat, (int)start, 0, (int)slicelength, col_len);
         }
 
         if (PyTuple_Check(key))
@@ -778,127 +930,51 @@ PyObject *Matrixox_subscript(Matrixox *self, PyObject *key)
                 return NULL;
             }
 
-            PyObject *row_key = PyTuple_GetItem(key, 0);
-            PyObject *col_key = PyTuple_GetItem(key, 1);
-
-            row_len = self->mat->rows;
-            col_len = self->mat->cols;
+            PyObject *row_key = PyTuple_GET_ITEM(key, 0);
+            PyObject *col_key = PyTuple_GET_ITEM(key, 1);
 
             if (PyLong_Check(row_key) && PyLong_Check(col_key))
             {
-                double num = get(self->mat, PyLong_AS_LONG(row_key), PyLong_AS_LONG(col_key));
-                return PyFloat_FromDouble(num);
+                int r = 0, c = 0;
+                if (parse_int_index(row_key, row_len, &r) != 0 ||
+                    parse_int_index(col_key, col_len, &c) != 0)
+                {
+                    return NULL;
+                }
+                return PyFloat_FromDouble(get(self->mat, r, c));
             }
             if (PyLong_Check(row_key) && PySlice_Check(col_key))
             {
-                Matrixox *result = (Matrixox *)MatrixoxType.tp_alloc(&MatrixoxType, 0);
-                Py_ssize_t start = 0, stop = 0, step = 0, slicelength = 0;
-                if (PySlice_GetIndicesEx(col_key, col_len, &start, &stop, &step, &slicelength) < 0)
+                int r = 0;
+                Py_ssize_t start = 0, slicelength = 0;
+                if (parse_int_index(row_key, row_len, &r) != 0 ||
+                    parse_slice_step1(col_key, col_len, &start, &slicelength) != 0)
                 {
                     return NULL;
                 }
-                if (step != 1)
-                {
-                    PyErr_SetString(PyExc_ValueError, "Slice step must be 1");
-                    return NULL;
-                }
-                if (slicelength < 1)
-                {
-                    PyErr_SetString(PyExc_ValueError, "Slice cannot result in empty dimension");
-                    return NULL;
-                }
-                int err = allocate_matrix_ref(&(result->mat), self->mat, PyLong_AS_LONG(row_key), start, 1, slicelength);
-
-                if (err != 0)
-                {
-                    Py_DECREF(result);
-                    return NULL;
-                }
-
-                result->shape = get_shape(result->mat->rows, result->mat->cols);
-
-                return (PyObject *)result;
+                return create_matrixox_ref(self->mat, r, (int)start, 1, (int)slicelength);
             }
-
-            if (PyLong_Check(col_key) && PySlice_Check(row_key))
+            if (PySlice_Check(row_key) && PyLong_Check(col_key))
             {
-                Matrixox *result = (Matrixox *)MatrixoxType.tp_alloc(&MatrixoxType, 0);
-                Py_ssize_t start = 0, stop = 0, step = 0, slicelength = 0;
-                if (PySlice_GetIndicesEx(row_key, row_len, &start, &stop, &step, &slicelength) < 0)
+                int c = 0;
+                Py_ssize_t start = 0, slicelength = 0;
+                if (parse_slice_step1(row_key, row_len, &start, &slicelength) != 0 ||
+                    parse_int_index(col_key, col_len, &c) != 0)
                 {
                     return NULL;
                 }
-                if (step != 1)
-                {
-                    PyErr_SetString(PyExc_ValueError, "Slice step must be 1");
-                    return NULL;
-                }
-                if (slicelength < 1)
-                {
-                    PyErr_SetString(PyExc_ValueError, "Slice cannot result in empty dimension");
-                    return NULL;
-                }
-                int err = allocate_matrix_ref(&(result->mat), self->mat, start, PyLong_AS_LONG(col_key), slicelength, 1);
-
-                if (err != 0)
-                {
-                    Py_DECREF(result);
-                    return NULL;
-                }
-
-                result->shape = get_shape(result->mat->rows, result->mat->cols);
-
-                return (PyObject *)result;
+                return create_matrixox_ref(self->mat, (int)start, c, (int)slicelength, 1);
             }
-
-            if (PySlice_Check(col_key) && PySlice_Check(row_key))
+            if (PySlice_Check(row_key) && PySlice_Check(col_key))
             {
-                int row_len = self->mat->rows;
-                int col_len = self->mat->cols;
-
-                Matrixox *result = (Matrixox *)MatrixoxType.tp_alloc(&MatrixoxType, 0);
-                Py_ssize_t start1 = 0, stop1 = 0, step1 = 0, slicelength1 = 0;
-                if (PySlice_GetIndicesEx(row_key, row_len, &start1, &stop1, &step1, &slicelength1) < 0)
+                Py_ssize_t start1 = 0, slicelength1 = 0;
+                Py_ssize_t start2 = 0, slicelength2 = 0;
+                if (parse_slice_step1(row_key, row_len, &start1, &slicelength1) != 0 ||
+                    parse_slice_step1(col_key, col_len, &start2, &slicelength2) != 0)
                 {
                     return NULL;
                 }
-                if (step1 != 1)
-                {
-                    PyErr_SetString(PyExc_ValueError, "Slice step must be 1");
-                    return NULL;
-                }
-                if (slicelength1 < 1)
-                {
-                    PyErr_SetString(PyExc_ValueError, "Slice cannot result in empty dimension");
-                    return NULL;
-                }
-
-                Py_ssize_t start2 = 0, stop2 = 0, step2 = 0, slicelength2 = 0;
-                if (PySlice_GetIndicesEx(col_key, col_len, &start2, &stop2, &step2, &slicelength2) < 0)
-                {
-                    return NULL;
-                }
-                if (step2 != 1)
-                {
-                    PyErr_SetString(PyExc_ValueError, "Slice step must be 1");
-                    return NULL;
-                }
-                if (slicelength2 < 1)
-                {
-                    PyErr_SetString(PyExc_ValueError, "Slice cannot result in empty dimension");
-                    return NULL;
-                }
-
-                int err = allocate_matrix_ref(&(result->mat), self->mat, start1, start2, slicelength1, slicelength2);
-
-                if (err != 0)
-                {
-                    Py_DECREF(result);
-                    return NULL;
-                }
-
-                result->shape = get_shape(result->mat->rows, result->mat->cols);
-                return (PyObject *)result;
+                return create_matrixox_ref(self->mat, (int)start1, (int)start2, (int)slicelength1, (int)slicelength2);
             }
 
             PyErr_SetString(PyExc_TypeError, "Invalid index type");
@@ -909,40 +985,121 @@ PyObject *Matrixox_subscript(Matrixox *self, PyObject *key)
     }
 }
 
+/* Helper to validate and write a 1D Python list into a matrix slice */
+static int set_1d_list_values(matrix *mat, int row_start, int col_start, int is_row_vec, PyObject *v, Py_ssize_t expected_len)
+{
+    if (!PyList_Check(v))
+    {
+        PyErr_SetString(PyExc_TypeError, "Value must be a list");
+        return -1;
+    }
+    if (PyList_Size(v) != expected_len)
+    {
+        PyErr_SetString(PyExc_ValueError, "Size of value list does not match slice length");
+        return -1;
+    }
+    /* Validate all elements before mutating */
+    for (Py_ssize_t i = 0; i < expected_len; i++)
+    {
+        double tmp;
+        if (py_to_double(PyList_GET_ITEM(v, i), &tmp) != 0)
+        {
+            return -1;
+        }
+    }
+    for (Py_ssize_t i = 0; i < expected_len; i++)
+    {
+        double val;
+        py_to_double(PyList_GET_ITEM(v, i), &val);
+        if (is_row_vec)
+        {
+            set(mat, row_start, col_start + (int)i, val);
+        }
+        else
+        {
+            set(mat, row_start + (int)i, col_start, val);
+        }
+    }
+    return 0;
+}
+
+/* Helper to validate and write a 2D list/tuple of lists into a matrix slice */
+static int set_2d_seq_values(matrix *mat, int row_start, int col_start, Py_ssize_t expected_rows, Py_ssize_t expected_cols, PyObject *v)
+{
+    if (!PyList_Check(v) && !PyTuple_Check(v))
+    {
+        PyErr_SetString(PyExc_TypeError, "Value must be a list or tuple of lists");
+        return -1;
+    }
+    Py_ssize_t rn = PySequence_Size(v);
+    if (rn != expected_rows)
+    {
+        PyErr_SetString(PyExc_ValueError, "Row count of value does not match slice");
+        return -1;
+    }
+    for (Py_ssize_t i = 0; i < rn; i++)
+    {
+        PyObject *row_obj = PyList_Check(v) ? PyList_GET_ITEM(v, i) : PyTuple_GET_ITEM(v, i);
+        if (!PyList_Check(row_obj) && !PyTuple_Check(row_obj))
+        {
+            PyErr_SetString(PyExc_TypeError, "Each row in value must be a list or tuple");
+            return -1;
+        }
+        Py_ssize_t cn = PySequence_Size(row_obj);
+        if (cn != expected_cols)
+        {
+            PyErr_SetString(PyExc_ValueError, "Column count of value does not match slice");
+            return -1;
+        }
+        for (Py_ssize_t j = 0; j < cn; j++)
+        {
+            PyObject *elem = PyList_Check(row_obj) ? PyList_GET_ITEM(row_obj, j) : PyTuple_GET_ITEM(row_obj, j);
+            double tmp;
+            if (py_to_double(elem, &tmp) != 0)
+            {
+                return -1;
+            }
+        }
+    }
+    for (Py_ssize_t i = 0; i < rn; i++)
+    {
+        PyObject *row_obj = PyList_Check(v) ? PyList_GET_ITEM(v, i) : PyTuple_GET_ITEM(v, i);
+        for (Py_ssize_t j = 0; j < expected_cols; j++)
+        {
+            PyObject *elem = PyList_Check(row_obj) ? PyList_GET_ITEM(row_obj, j) : PyTuple_GET_ITEM(row_obj, j);
+            double val;
+            py_to_double(elem, &val);
+            set(mat, row_start + (int)i, col_start + (int)j, val);
+        }
+    }
+    return 0;
+}
+
 /*
  * Given a numox.Matrix `self`, index into it with `key`, and set the indexed result to `v`.
  */
 int Matrixox_set_subscript(Matrixox *self, PyObject *key, PyObject *v)
 {
+    if (!v)
+    {
+        PyErr_SetString(PyExc_TypeError, "Deleting matrix elements is not supported");
+        return -1;
+    }
 
     if (self->mat->is_1d)
     {
+        int len = (self->mat->rows == 1) ? self->mat->cols : self->mat->rows;
+        int is_row_vec = (self->mat->rows == 1);
+
         if (PyLong_Check(key))
         {
-            int idx = PyLong_AS_LONG(key);
-            int len = self->mat->rows == 1 ? self->mat->cols : self->mat->rows;
-
-            if (idx < 0 || idx >= len)
+            int idx = 0;
+            double val = 0.0;
+            if (parse_int_index(key, len, &idx) != 0 || py_to_double(v, &val) != 0)
             {
-                PyErr_SetString(PyExc_IndexError, "Index out of range");
                 return -1;
             }
-            double val;
-            if (PyFloat_Check(v))
-            {
-                val = PyFloat_AS_DOUBLE(v);
-            }
-            else if (PyLong_Check(v))
-            {
-                val = (double)PyLong_AsLong(v);
-            }
-            else
-            {
-                PyErr_SetString(PyExc_TypeError, "value should be an int or float");
-                return -1;
-            }
-
-            if (self->mat->rows == 1)
+            if (is_row_vec)
             {
                 set(self->mat, 0, idx, val);
             }
@@ -952,54 +1109,20 @@ int Matrixox_set_subscript(Matrixox *self, PyObject *key, PyObject *v)
             }
             return 0;
         }
-        else if (PySlice_Check(key))
+        if (PySlice_Check(key))
         {
-            int len = self->mat->rows == 1 ? self->mat->cols : self->mat->rows;
-
-            if (!PyList_Check(v))
-            {
-                PyErr_SetString(PyExc_TypeError, "value should be a list here");
-                return -1;
-            }
-            Py_ssize_t start = 0, stop = 0, step = 0, slicelength = 0;
-            if (PySlice_GetIndicesEx(key, len, &start, &stop, &step, &slicelength) < 0)
+            Py_ssize_t start = 0, slicelength = 0;
+            if (parse_slice_step1(key, len, &start, &slicelength) != 0)
             {
                 return -1;
             }
-            if (step != 1)
-            {
-                PyErr_SetString(PyExc_ValueError, "Slice step must be 1");
-                return -1;
-            }
-            if (slicelength < 1)
-            {
-                PyErr_SetString(PyExc_ValueError, "Slice cannot result in empty dimension");
-                return -1;
-            }
-            if (slicelength > len)
-            {
-                PyErr_SetString(PyExc_ValueError, "the length of the slice is too long");
-                return -1;
-            }
-            if (PyList_Size(v) != slicelength)
-            {
-                PyErr_SetString(PyExc_ValueError, "The size of the value should suit the matrix");
-                return -1;
-            }
-
-            for (int i = 0; i < slicelength; i++)
-            {
-                if (self->mat->rows == 1)
-                {
-                    set(self->mat, 0, i + start, PyFloat_AS_DOUBLE(PyList_GetItem(v, (Py_ssize_t)i)));
-                }
-                else
-                {
-                    set(self->mat, i + start, 0, PyFloat_AS_DOUBLE(PyList_GetItem(v, (Py_ssize_t)i)));
-                }
-            }
+            int row_start = is_row_vec ? 0 : (int)start;
+            int col_start = is_row_vec ? (int)start : 0;
+            return set_1d_list_values(self->mat, row_start, col_start, is_row_vec, v, slicelength);
         }
-        return 0;
+
+        PyErr_SetString(PyExc_TypeError, "Invalid key type");
+        return -1;
     }
     else
     {
@@ -1008,134 +1131,81 @@ int Matrixox_set_subscript(Matrixox *self, PyObject *key, PyObject *v)
 
         if (PyLong_Check(key))
         {
-            if (!PyList_Check(v))
+            int r = 0;
+            if (parse_int_index(key, row_len, &r) != 0)
             {
-                PyErr_SetString(PyExc_TypeError, "Type didn't match");
                 return -1;
             }
-            if (PyList_GET_SIZE(v) != col_len)
-            {
-                PyErr_SetString(PyExc_ValueError, "the size of key and v didn't match");
-                return -1;
-            }
-
-            for (int i = 0; i < PyList_GET_SIZE(v); i++)
-            {
-                set(self->mat, PyLong_AS_LONG(key), i, PyFloat_AS_DOUBLE(PyList_GET_ITEM(v, i)));
-            }
-
-            return 0;
+            return set_1d_list_values(self->mat, r, 0, 1, v, col_len);
         }
         if (PySlice_Check(key))
         {
-            if (!PyTuple_Check(v))
-            {
-                PyErr_SetString(PyExc_TypeError, "Type didn't match");
-                return -1;
-            }
-
-            Py_ssize_t start = 0, stop = 0, step = 0, slicelength = 0;
-            Py_ssize_t n = PyTuple_Size(v);
-            if (PySlice_GetIndicesEx(key, row_len, &start, &stop, &step, &slicelength) < 0)
+            Py_ssize_t start = 0, slicelength = 0;
+            if (parse_slice_step1(key, row_len, &start, &slicelength) != 0)
             {
                 return -1;
             }
-            if (step != 1)
-            {
-                PyErr_SetString(PyExc_ValueError, "Slice step must be 1");
-                return -1;
-            }
-            if (slicelength < 1)
-            {
-                PyErr_SetString(PyExc_ValueError, "Slice cannot result in empty dimension");
-                return -1;
-            }
-            if (slicelength != n)
-            {
-                PyErr_SetString(PyExc_ValueError, "the size of the key and the v didn't match");
-                return -1;
-            }
-            if (col_len != PyList_Size(PyTuple_GET_ITEM(v, 0)))
-            {
-                PyErr_SetString(PyExc_ValueError, "the size of the key and the v didn't match");
-                return -1;
-            }
-
-            for (int i = 0; i < n; i++)
-            {
-                PyObject *l = PyTuple_GET_ITEM(v, i);
-                for (int j = 0; j < col_len; j++)
-                {
-                    set(self->mat, start + i, j, PyLong_AS_LONG(PyList_GET_ITEM(l, j)));
-                }
-            }
-
-            return 0;
+            return set_2d_seq_values(self->mat, (int)start, 0, slicelength, col_len, v);
         }
         if (PyTuple_Check(key))
         {
-            if (!PyList_Check(v))
-            {
-                PyErr_SetString(PyExc_TypeError, "Type didn't match");
-            }
             if (PyTuple_Size(key) != 2)
             {
-                PyErr_SetString(PyExc_ValueError, "only support two dimentional matrix");
+                PyErr_SetString(PyExc_ValueError, "2D matrix requires 2 slice/index arguments");
                 return -1;
             }
-            PyObject *key1 = PyTuple_GetItem(key, 0);
-            PyObject *key2 = PyTuple_GetItem(key, 1);
+            PyObject *key1 = PyTuple_GET_ITEM(key, 0);
+            PyObject *key2 = PyTuple_GET_ITEM(key, 1);
 
-            Py_ssize_t start1 = 0, stop1 = 0, step1 = 0, slicelength1 = 0;
-            if (PySlice_GetIndicesEx(key1, row_len, &start1, &stop1, &step1, &slicelength1) < 0)
+            if (PyLong_Check(key1) && PyLong_Check(key2))
             {
-                return -1;
-            }
-            if (step1 != 1)
-            {
-                PyErr_SetString(PyExc_ValueError, "Slice step must be 1");
-                return -1;
-            }
-            if (slicelength1 < 1)
-            {
-                PyErr_SetString(PyExc_ValueError, "Slice cannot result in empty dimension");
-                return -1;
-            }
-
-            Py_ssize_t start2 = 0, stop2 = 0, step2 = 0, slicelength2 = 0;
-            if (PySlice_GetIndicesEx(key2, col_len, &start2, &stop2, &step2, &slicelength2) < 0)
-            {
-                return -1;
-            }
-            if (step2 != 1)
-            {
-                PyErr_SetString(PyExc_ValueError, "Slice step must be 1");
-                return -1;
-            }
-            if (slicelength2 < 1)
-            {
-                PyErr_SetString(PyExc_ValueError, "Slice cannot result in empty dimension");
-                return -1;
-            }
-
-            Py_ssize_t rn = PyTuple_Size(v);
-            Py_ssize_t cn = PyList_Size(PyTuple_GET_ITEM(v, 0));
-
-            if (rn != slicelength1 || cn != slicelength2)
-            {
-                PyErr_SetString(PyExc_ValueError, "the size of key and v didn't match");
-                return -1;
-            }
-
-            for (int i = 0; i < rn; i++)
-            {
-                for (int j = 0; j < cn; j++)
+                int r = 0, c = 0;
+                double val = 0.0;
+                if (parse_int_index(key1, row_len, &r) != 0 ||
+                    parse_int_index(key2, col_len, &c) != 0 ||
+                    py_to_double(v, &val) != 0)
                 {
-                    set(self->mat, start1 + i, start2 + j, PyLong_AS_LONG(PyList_GET_ITEM(PyTuple_GET_ITEM(v, i), j)));
+                    return -1;
                 }
+                set(self->mat, r, c, val);
+                return 0;
+            }
+            if (PyLong_Check(key1) && PySlice_Check(key2))
+            {
+                int r = 0;
+                Py_ssize_t start = 0, slicelength = 0;
+                if (parse_int_index(key1, row_len, &r) != 0 ||
+                    parse_slice_step1(key2, col_len, &start, &slicelength) != 0)
+                {
+                    return -1;
+                }
+                return set_1d_list_values(self->mat, r, (int)start, 1, v, slicelength);
+            }
+            if (PySlice_Check(key1) && PyLong_Check(key2))
+            {
+                int c = 0;
+                Py_ssize_t start = 0, slicelength = 0;
+                if (parse_slice_step1(key1, row_len, &start, &slicelength) != 0 ||
+                    parse_int_index(key2, col_len, &c) != 0)
+                {
+                    return -1;
+                }
+                return set_1d_list_values(self->mat, (int)start, c, 0, v, slicelength);
+            }
+            if (PySlice_Check(key1) && PySlice_Check(key2))
+            {
+                Py_ssize_t start1 = 0, slicelength1 = 0;
+                Py_ssize_t start2 = 0, slicelength2 = 0;
+                if (parse_slice_step1(key1, row_len, &start1, &slicelength1) != 0 ||
+                    parse_slice_step1(key2, col_len, &start2, &slicelength2) != 0)
+                {
+                    return -1;
+                }
+                return set_2d_seq_values(self->mat, (int)start1, (int)start2, slicelength1, slicelength2, v);
             }
 
-            return 0;
+            PyErr_SetString(PyExc_TypeError, "Invalid index type");
+            return -1;
         }
 
         PyErr_SetString(PyExc_TypeError, "The type of key is not suitable");
@@ -1149,9 +1219,91 @@ PyMappingMethods Matrixox_mapping = {
     (objobjargproc)Matrixox_set_subscript,
 };
 
+/* BUFFER PROTOCOL */
+typedef struct {
+    Py_ssize_t shape[2];
+    Py_ssize_t strides[2];
+} MatrixoxBufferInfo;
+
+static int Matrixox_getbuffer(Matrixox *self, Py_buffer *view, int flags)
+{
+    if (view == NULL)
+    {
+        PyErr_SetString(PyExc_ValueError, "NULL view in getbuffer");
+        return -1;
+    }
+    if (self->mat == NULL)
+    {
+        PyErr_SetString(PyExc_BufferError, "Matrix is not initialized");
+        return -1;
+    }
+
+    MatrixoxBufferInfo *info = (MatrixoxBufferInfo *)malloc(sizeof(MatrixoxBufferInfo));
+    if (!info)
+    {
+        PyErr_NoMemory();
+        return -1;
+    }
+
+    int is_c_contig = 0;
+    if (self->mat->is_1d)
+    {
+        view->ndim = 1;
+        info->shape[0] = (self->mat->rows == 1) ? self->mat->cols : self->mat->rows;
+        info->strides[0] = (self->mat->rows == 1)
+                               ? (Py_ssize_t)sizeof(double)
+                               : (Py_ssize_t)self->mat->stride * (Py_ssize_t)sizeof(double);
+        is_c_contig = (self->mat->rows == 1) || (self->mat->stride == 1);
+    }
+    else
+    {
+        view->ndim = 2;
+        info->shape[0] = self->mat->rows;
+        info->shape[1] = self->mat->cols;
+        info->strides[0] = (Py_ssize_t)self->mat->stride * (Py_ssize_t)sizeof(double);
+        info->strides[1] = (Py_ssize_t)sizeof(double);
+        is_c_contig = (self->mat->stride == self->mat->cols);
+    }
+
+    if (((flags & PyBUF_C_CONTIGUOUS) == PyBUF_C_CONTIGUOUS && !is_c_contig) ||
+        ((flags & PyBUF_F_CONTIGUOUS) == PyBUF_F_CONTIGUOUS) ||
+        ((flags & PyBUF_ANY_CONTIGUOUS) == PyBUF_ANY_CONTIGUOUS && !is_c_contig) ||
+        ((flags & PyBUF_STRIDES) != PyBUF_STRIDES && !is_c_contig))
+    {
+        free(info);
+        PyErr_SetString(PyExc_BufferError, "Matrix view is not contiguous");
+        return -1;
+    }
+
+    view->buf = self->mat->data;
+    view->obj = (PyObject *)self;
+    Py_INCREF(self);
+    view->len = (Py_ssize_t)self->mat->rows * (Py_ssize_t)self->mat->cols * (Py_ssize_t)sizeof(double);
+    view->readonly = 0;
+    view->itemsize = sizeof(double);
+    view->format = (flags & PyBUF_FORMAT) ? "d" : NULL;
+    view->shape = (flags & PyBUF_ND) ? info->shape : NULL;
+    view->strides = (flags & PyBUF_STRIDES) ? info->strides : NULL;
+    view->suboffsets = NULL;
+    view->internal = info;
+    return 0;
+}
+
+static void Matrixox_releasebuffer(Matrixox *self, Py_buffer *view)
+{
+    (void)self;
+    free(view->internal);
+    view->internal = NULL;
+}
+
+PyBufferProcs Matrixox_as_buffer = {
+    .bf_getbuffer = (getbufferproc)Matrixox_getbuffer,
+    .bf_releasebuffer = (releasebufferproc)Matrixox_releasebuffer,
+};
+
 /* INSTANCE ATTRIBUTES*/
 PyMemberDef Matrixox_members[] = {
-    {"shape", T_OBJECT_EX, offsetof(Matrixox, shape), 0,
+    {"shape", T_OBJECT_EX, offsetof(Matrixox, shape), READONLY,
      "(rows, cols)"},
     {NULL} /* Sentinel */
 };
@@ -1163,6 +1315,7 @@ PyTypeObject MatrixoxType = {
     .tp_dealloc = (destructor)Matrixox_dealloc,
     .tp_repr = (reprfunc)Matrixox_repr,
     .tp_as_number = &Matrixox_as_number,
+    .tp_as_buffer = &Matrixox_as_buffer,
     .tp_flags = Py_TPFLAGS_DEFAULT |
                 Py_TPFLAGS_BASETYPE,
     .tp_doc = "numox.Matrix objects",

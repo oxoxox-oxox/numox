@@ -10,7 +10,7 @@ You can install `numox` directly from this GitHub repository:
 
 ```bash
 # Note: Ensure you have a C compiler (GCC/Clang) with OpenMP support installed.
-pip install git https://github.com/YourUsername/numox.git
+pip install git+https://github.com/oxoxox-oxox/numox.git
 ```
 
 ### Docker Development Environment

@@ -1,8 +1,10 @@
 /.vscode
 test
-test.py
-/tests
 /build
 /numox.egg-info
+__pycache__/
+.pytest_cache/
 numox.cpython*
 numox.cp*
+*.pyd
+*.so

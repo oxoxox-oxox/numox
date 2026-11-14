@@ -1,18 +1,28 @@
 from setuptools import setup, Extension
+import platform
 import sys
 
 def main():
-    # 根据操作系统动态分配编译参数
+    machine = platform.machine().lower()
+    is_x86 = machine in ('x86_64', 'amd64', 'x86', 'i386', 'i686')
+
+    # 根据操作系统和 CPU 架构动态分配编译参数
     if sys.platform == 'win32':
-        CFLAGS = ['/openmp:llvm', '/O2', '/arch:AVX2', '/fp:fast', '/GL']
+        CFLAGS = ['/openmp:llvm', '/O2', '/fp:fast', '/GL']
+        if is_x86:
+            CFLAGS.append('/arch:AVX2')
         LDFLAGS = ['/LTCG']
     elif sys.platform == 'darwin':
         # Mac OS
-        CFLAGS = ['-O3', '-Wall', '-std=c99', '-Xpreprocessor', '-fopenmp', '-mavx2', '-mfma', '-ffast-math', '-flto']
+        CFLAGS = ['-O3', '-Wall', '-std=c99', '-Xpreprocessor', '-fopenmp', '-ffast-math', '-flto']
+        if is_x86:
+            CFLAGS.extend(['-mavx2', '-mfma'])
         LDFLAGS = ['-lomp', '-flto']
     else:
         # Linux
-        CFLAGS = ['-Wall', '-std=c99', '-fopenmp', '-mavx2', '-mfma', '-ffast-math', '-flto', '-pthread', '-O3']
+        CFLAGS = ['-Wall', '-std=c99', '-fopenmp', '-ffast-math', '-flto', '-pthread', '-O3']
+        if is_x86:
+            CFLAGS.extend(['-mavx2', '-mfma'])
         LDFLAGS = ['-fopenmp', '-flto']
 
     numox_module = Extension('numox',
