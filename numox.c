@@ -1,4 +1,5 @@
 #include "numox.h"
+#include <limits.h>
 #include <structmember.h>
 
 PyTypeObject MatrixoxType;

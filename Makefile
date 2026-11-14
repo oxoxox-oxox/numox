@@ -1,5 +1,5 @@
 CC = gcc
-CFLAGS = -g -Wall -std=c99 -fopenmp -mavx -mfma -pthread
+CFLAGS = -g -Wall -std=c99 -I. -fopenmp -mavx2 -mfma -pthread
 LDFLAGS = -fopenmp
 CUNIT = -lcunit
 PYTHON = $(shell python3-config --cflags) $(shell python3-config --ldflags --embed)
