@@ -207,6 +207,13 @@ class TestNumox(unittest.TestCase):
         self.assertEqual(valid.shape, (4, 4))
         self.assertEqual(valid.get(3, 3), 3.0)
 
+    def test_package_metadata(self):
+        self.assertEqual(nc.Matrix.__module__, "numox")
+        if hasattr(nc, "_core"):
+            self.assertIsInstance(nc.__version__, str)
+            self.assertIn("Matrix", nc.__all__)
+            self.assertIn("to_list", nc.__all__)
+
 
 if __name__ == "__main__":
     unittest.main()

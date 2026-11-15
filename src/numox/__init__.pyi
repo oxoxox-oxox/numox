@@ -44,3 +44,7 @@ class Matrix:
     ) -> None: ...
 
 def to_list(mat: Matrix) -> Union[List[float], List[List[float]]]: ...
+
+__version__: str
+__all__: List[str]
+

@@ -1,7 +1,11 @@
 /.vscode
 test
+test.exe
+*.o
 /build
+/dist
 /numox.egg-info
+/src/*.egg-info
 __pycache__/
 .pytest_cache/
 numox.cpython*

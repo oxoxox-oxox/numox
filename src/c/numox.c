@@ -1439,15 +1439,15 @@ PyTypeObject MatrixoxType = {
     .tp_init = (initproc)Matrixox_init,
     .tp_new = Matrixox_new};
 
-struct PyModuleDef numoxmodule = {
+static struct PyModuleDef numoxmodule = {
     PyModuleDef_HEAD_INIT,
-    "numox",
-    "Numc matrix operations",
+    "_core",
+    "Numox C extension core",
     -1,
     Matrixox_class_methods};
 
-/* Initialize the numox module */
-PyMODINIT_FUNC PyInit_numox(void)
+/* Initialize the numox._core extension module */
+PyMODINIT_FUNC PyInit__core(void)
 {
     PyObject *m;
 

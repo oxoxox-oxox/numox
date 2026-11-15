@@ -1,2 +1,3 @@
-include *.h
-include *.pyi
+include README.md README_zh.md
+recursive-include src/c *.h
+recursive-include src/numox *.pyi py.typed
