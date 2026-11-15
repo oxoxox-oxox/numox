@@ -9,7 +9,7 @@ PyTypeObject MatrixoxType;
 /*
  * Return a tuple given rows and cols
  */
-PyObject *get_shape(int rows, int cols)
+static PyObject *get_shape(int rows, int cols)
 {
     if (rows == 1 || cols == 1)
     {
@@ -57,9 +57,36 @@ static int py_to_double(PyObject *obj, double *out)
     PyErr_SetString(PyExc_TypeError, "Matrix elements must be int or float");
     return -1;
 }
-/*
- * Matrix(rows, cols, low, high). Fill a matrix random double values
- */
+static int py_to_positive_int(PyObject *obj, int *out)
+{
+    if (!PyLong_Check(obj))
+    {
+        PyErr_SetString(PyExc_TypeError, "Matrix dimensions must be integers");
+        return -1;
+    }
+    long v = PyLong_AsLong(obj);
+    if (v == -1 && PyErr_Occurred())
+    {
+        return -1;
+    }
+    if (v <= 0 || v > INT_MAX)
+    {
+        PyErr_SetString(PyExc_ValueError, "Matrix dimensions must be positive");
+        return -1;
+    }
+    *out = (int)v;
+    return 0;
+}
+
+static int check_initialized(const Matrixox *m)
+{
+    if (!m || m->mat == NULL)
+    {
+        PyErr_SetString(PyExc_RuntimeError, "Matrix is not initialized");
+        return -1;
+    }
+    return 0;
+}
 int init_rand(PyObject *self, int rows, int cols, unsigned int seed, double low,
               double high)
 {
@@ -128,7 +155,12 @@ int init_1d(PyObject *self, int rows, int cols, PyObject *lst)
         PyErr_SetString(PyExc_ValueError, "Matrix dimensions must be positive");
         return -1;
     }
-    if ((Py_ssize_t)rows * (Py_ssize_t)cols != PyList_Size(lst))
+    Py_ssize_t list_len = PyList_Size(lst);
+    if (list_len < 0)
+    {
+        return -1;
+    }
+    if (list_len / cols != rows || list_len % cols != 0)
     {
         PyErr_SetString(PyExc_ValueError, "Incorrect number of elements in list");
         return -1;
@@ -187,6 +219,11 @@ int init_2d(PyObject *self, PyObject *lst)
     if (cols_sz <= 0)
     {
         PyErr_SetString(PyExc_ValueError, "List values not valid");
+        return -1;
+    }
+    if (rows_sz > INT_MAX || cols_sz > INT_MAX)
+    {
+        PyErr_SetString(PyExc_OverflowError, "Matrix dimensions exceed integer limit");
         return -1;
     }
     int rows = (int)rows_sz;
@@ -256,6 +293,11 @@ PyObject *Matrixox_new(PyTypeObject *type, PyObject *args,
 int Matrixox_init(PyObject *self, PyObject *args, PyObject *kwds)
 {
     Matrixox *m = (Matrixox *)self;
+    if (m->export_count > 0)
+    {
+        PyErr_SetString(PyExc_BufferError, "Existing exports of data: cannot re-initialize Matrix");
+        return -1;
+    }
     if (m->mat != NULL)
     {
         deallocate_matrix(m->mat);
@@ -289,7 +331,7 @@ int Matrixox_init(PyObject *self, PyObject *args, PyObject *kwds)
             return -1;
         }
 
-        if (double_low >= double_high)
+        if (!(double_low < double_high))
         {
             PyErr_SetString(PyExc_ValueError, "Invalid arguments: low must be less than high");
             return -1;
@@ -311,13 +353,12 @@ int Matrixox_init(PyObject *self, PyObject *args, PyObject *kwds)
         {
             return -1;
         }
-        if (PyLong_Check(rows) && PyLong_Check(cols))
+        int r = 0, c = 0;
+        if (py_to_positive_int(rows, &r) != 0 || py_to_positive_int(cols, &c) != 0)
         {
-            return init_rand(self, (int)PyLong_AsLong(rows), (int)PyLong_AsLong(cols),
-                             unsigned_seed, double_low, double_high);
+            return -1;
         }
-        PyErr_SetString(PyExc_TypeError, "Invalid arguments");
-        return -1;
+        return init_rand(self, r, c, unsigned_seed, double_low, double_high);
     }
     PyObject *arg1 = NULL;
     PyObject *arg2 = NULL;
@@ -327,27 +368,40 @@ int Matrixox_init(PyObject *self, PyObject *args, PyObject *kwds)
         /* arguments are (rows, cols, val) */
         if (arg1 && arg2 && arg3 && PyLong_Check(arg1) && PyLong_Check(arg2) && (PyLong_Check(arg3) || PyFloat_Check(arg3)))
         {
-            if (PyLong_Check(arg3))
+            int r = 0, c = 0;
+            double val = 0.0;
+            if (py_to_positive_int(arg1, &r) != 0 ||
+                py_to_positive_int(arg2, &c) != 0 ||
+                py_to_double(arg3, &val) != 0)
             {
-                return init_fill(self, PyLong_AsLong(arg1), PyLong_AsLong(arg2), PyLong_AsLong(arg3));
+                return -1;
             }
-            else
-                return init_fill(self, PyLong_AsLong(arg1), PyLong_AsLong(arg2), PyFloat_AsDouble(arg3));
+            return init_fill(self, r, c, val);
         }
         else if (arg1 && arg2 && arg3 && PyLong_Check(arg1) && PyLong_Check(arg2) && PyList_Check(arg3))
         {
+            int r = 0, c = 0;
+            if (py_to_positive_int(arg1, &r) != 0 || py_to_positive_int(arg2, &c) != 0)
+            {
+                return -1;
+            }
             /* Matrix(rows, cols, 1D list) */
-            return init_1d(self, PyLong_AsLong(arg1), PyLong_AsLong(arg2), arg3);
+            return init_1d(self, r, c, arg3);
         }
         else if (arg1 && PyList_Check(arg1) && arg2 == NULL && arg3 == NULL)
         {
-            /* Matrix(rows, cols, 1D list) */
+            /* Matrix(2D list) */
             return init_2d(self, arg1);
         }
         else if (arg1 && arg2 && PyLong_Check(arg1) && PyLong_Check(arg2) && arg3 == NULL)
         {
-            /* Matrix(rows, cols, 1D list) */
-            return init_fill(self, PyLong_AsLong(arg1), PyLong_AsLong(arg2), 0);
+            int r = 0, c = 0;
+            if (py_to_positive_int(arg1, &r) != 0 || py_to_positive_int(arg2, &c) != 0)
+            {
+                return -1;
+            }
+            /* Matrix(rows, cols) */
+            return init_fill(self, r, c, 0.0);
         }
         else
         {
@@ -367,18 +421,33 @@ int Matrixox_init(PyObject *self, PyObject *args, PyObject *kwds)
  */
 PyObject *Matrixox_to_list(Matrixox *self)
 {
+    if (check_initialized(self) != 0)
+    {
+        return NULL;
+    }
     int rows = self->mat->rows;
     int cols = self->mat->cols;
     PyObject *py_lst = NULL;
     if (self->mat->is_1d)
     { // If 1D matrix, print as a single list
-        py_lst = PyList_New(rows * cols);
-        int count = 0;
+        Py_ssize_t total = (Py_ssize_t)rows * (Py_ssize_t)cols;
+        py_lst = PyList_New(total);
+        if (!py_lst)
+        {
+            return NULL;
+        }
+        Py_ssize_t count = 0;
         for (int i = 0; i < rows; i++)
         {
             for (int j = 0; j < cols; j++)
             {
-                PyList_SetItem(py_lst, count, PyFloat_FromDouble(get(self->mat, i, j)));
+                PyObject *val = PyFloat_FromDouble(get(self->mat, i, j));
+                if (!val)
+                {
+                    Py_DECREF(py_lst);
+                    return NULL;
+                }
+                PyList_SET_ITEM(py_lst, count, val);
                 count++;
             }
         }
@@ -386,20 +455,35 @@ PyObject *Matrixox_to_list(Matrixox *self)
     else
     { // if 2D, print as nested list
         py_lst = PyList_New(rows);
+        if (!py_lst)
+        {
+            return NULL;
+        }
         for (int i = 0; i < rows; i++)
         {
-            PyList_SetItem(py_lst, i, PyList_New(cols));
-            PyObject *curr_row = PyList_GetItem(py_lst, i);
+            PyObject *curr_row = PyList_New(cols);
+            if (!curr_row)
+            {
+                Py_DECREF(py_lst);
+                return NULL;
+            }
+            PyList_SET_ITEM(py_lst, i, curr_row);
             for (int j = 0; j < cols; j++)
             {
-                PyList_SetItem(curr_row, j, PyFloat_FromDouble(get(self->mat, i, j)));
+                PyObject *val = PyFloat_FromDouble(get(self->mat, i, j));
+                if (!val)
+                {
+                    Py_DECREF(py_lst);
+                    return NULL;
+                }
+                PyList_SET_ITEM(curr_row, j, val);
             }
         }
     }
     return py_lst;
 }
 
-PyObject *Matrixox_class_to_list(Matrixox *self, PyObject *args)
+static PyObject *Matrixox_class_to_list(Matrixox *self, PyObject *args)
 {
     PyObject *mat = NULL;
     if (PyArg_UnpackTuple(args, "args", 1, 1, &mat))
@@ -481,6 +565,10 @@ PyObject *Matrixox_add(Matrixox *self, PyObject *args)
     }
 
     Matrixox *other = (Matrixox *)args;
+    if (check_initialized(self) != 0 || check_initialized(other) != 0)
+    {
+        return NULL;
+    }
 
     if (self->mat->rows != other->mat->rows ||
         self->mat->cols != other->mat->cols)
@@ -523,6 +611,10 @@ PyObject *Matrixox_sub(Matrixox *self, PyObject *args)
     }
 
     Matrixox *other = (Matrixox *)args;
+    if (check_initialized(self) != 0 || check_initialized(other) != 0)
+    {
+        return NULL;
+    }
 
     if (self->mat->rows != other->mat->rows ||
         self->mat->cols != other->mat->cols)
@@ -565,6 +657,10 @@ PyObject *Matrixox_multiply(Matrixox *self, PyObject *args)
     }
 
     Matrixox *other = (Matrixox *)args;
+    if (check_initialized(self) != 0 || check_initialized(other) != 0)
+    {
+        return NULL;
+    }
 
     if (self->mat->cols != other->mat->rows)
     {
@@ -598,6 +694,10 @@ PyObject *Matrixox_multiply(Matrixox *self, PyObject *args)
  */
 PyObject *Matrixox_neg(Matrixox *self)
 {
+    if (check_initialized(self) != 0)
+    {
+        return NULL;
+    }
     Matrixox *ans = create_matrixox(self->mat->rows, self->mat->cols);
     if (!ans)
     {
@@ -624,6 +724,10 @@ PyObject *Matrixox_neg(Matrixox *self)
  */
 PyObject *Matrixox_abs(Matrixox *self)
 {
+    if (check_initialized(self) != 0)
+    {
+        return NULL;
+    }
     Matrixox *ans = create_matrixox(self->mat->rows, self->mat->cols);
     if (!ans)
     {
@@ -662,6 +766,10 @@ PyObject *Matrixox_pow(Matrixox *self, PyObject *pow, PyObject *optional)
     }
     long p = PyLong_AsLong(pow);
     if (p == -1 && PyErr_Occurred())
+    {
+        return NULL;
+    }
+    if (check_initialized(self) != 0)
     {
         return NULL;
     }
@@ -706,94 +814,7 @@ PyNumberMethods Matrixox_as_number = {
     .nb_matrix_multiply = (binaryfunc)Matrixox_multiply,
 };
 
-/* INSTANCE METHODS */
-
-/*
- * Given a numox.Matrix self, parse `args` to (int) row, (int) col, and (double/int) val.
- * Return None in Python (this is different from returning null).
- */
-PyObject *Matrixox_set_value(Matrixox *self, PyObject *args)
-{
-    PyObject *r = NULL;
-    PyObject *c = NULL;
-    PyObject *v = NULL;
-
-    if (!PyArg_UnpackTuple(args, "set", 3, 3, &r, &c, &v))
-    {
-        return NULL;
-    }
-
-    if (!PyLong_Check(r) || !PyLong_Check(c) ||
-        (!PyLong_Check(v) && !PyFloat_Check(v)))
-    {
-        PyErr_SetString(PyExc_TypeError, "Invalid argument types");
-        return NULL;
-    }
-
-    int row = PyLong_AsLong(r);
-    int col = PyLong_AS_LONG(c);
-    double val = PyLong_Check(v) ? PyLong_AS_LONG(v) : PyFloat_AS_DOUBLE(v);
-
-    if (row < 0 || col < 0 || row >= self->mat->rows || col >= self->mat->cols)
-    {
-        PyErr_SetString(PyExc_IndexError, "row or column out of range");
-        return NULL;
-    }
-
-    set(self->mat, row, col, val);
-
-    Py_RETURN_NONE;
-}
-
-/*
- * Given a numox.Matrix `self`, parse `args` to (int) row and (int) col.
- * Return the value at the `row`th row and `col`th column, which is a Python
- * float/int.
- */
-PyObject *Matrixox_get_value(Matrixox *self, PyObject *args)
-{
-    PyObject *r = NULL;
-    PyObject *c = NULL;
-
-    if (!PyArg_UnpackTuple(args, "get", 2, 2, &r, &c))
-    {
-        return NULL;
-    }
-
-    if (!PyLong_Check(r) || !PyLong_Check(c))
-    {
-        PyErr_SetString(PyExc_TypeError, "Invalid argument types");
-        return NULL;
-    }
-
-    int row = PyLong_AsLong(r);
-    int col = PyLong_AS_LONG(c);
-
-    if (row < 0 || col < 0 || row >= self->mat->rows || col >= self->mat->cols)
-    {
-        PyErr_SetString(PyExc_IndexError, "row or column out of range");
-        return NULL;
-    }
-
-    double ans = get(self->mat, row, col);
-    PyObject *res = PyFloat_FromDouble(ans);
-
-    return res;
-}
-
-/*
- * Create an array of PyMethodDef structs to hold the instance methods.
- * Name the python function corresponding to Matrixox_get_value as "get" and Matrixox_set_value
- * as "set"
- * You might find this link helpful: https://docs.python.org/3.6/c-api/structures.html
- */
-PyMethodDef Matrixox_methods[] = {
-    {"get", (PyCFunction)Matrixox_get_value, METH_VARARGS, "Gets a value from the matrix at (row, col)"},
-    {"set", (PyCFunction)Matrixox_set_value, METH_VARARGS, "Sets a value in the matrix at (row, col, val)"},
-    {"to_list", (PyCFunction)Matrixox_to_list, METH_NOARGS, "Return a list representation of numox.Matrix"},
-    {NULL, NULL, 0, NULL}};
-
-/* INDEXING HELPERS */
+/* INDEXING & ELEMENT HELPERS */
 
 static int parse_int_index(PyObject *key, int len, int *out_idx)
 {
@@ -815,6 +836,85 @@ static int parse_int_index(PyObject *key, int len, int *out_idx)
     *out_idx = (int)idx;
     return 0;
 }
+
+/* INSTANCE METHODS */
+
+/*
+ * Given a numox.Matrix self, parse `args` to (int) row, (int) col, and (double/int) val.
+ * Return None in Python (this is different from returning null).
+ */
+PyObject *Matrixox_set_value(Matrixox *self, PyObject *args)
+{
+    if (check_initialized(self) != 0)
+    {
+        return NULL;
+    }
+    PyObject *r = NULL;
+    PyObject *c = NULL;
+    PyObject *v = NULL;
+
+    if (!PyArg_UnpackTuple(args, "set", 3, 3, &r, &c, &v))
+    {
+        return NULL;
+    }
+
+    int row = 0, col = 0;
+    double val = 0.0;
+    if (parse_int_index(r, self->mat->rows, &row) != 0 ||
+        parse_int_index(c, self->mat->cols, &col) != 0 ||
+        py_to_double(v, &val) != 0)
+    {
+        return NULL;
+    }
+
+    set(self->mat, row, col, val);
+
+    Py_RETURN_NONE;
+}
+
+/*
+ * Given a numox.Matrix `self`, parse `args` to (int) row and (int) col.
+ * Return the value at the `row`th row and `col`th column, which is a Python
+ * float/int.
+ */
+PyObject *Matrixox_get_value(Matrixox *self, PyObject *args)
+{
+    if (check_initialized(self) != 0)
+    {
+        return NULL;
+    }
+    PyObject *r = NULL;
+    PyObject *c = NULL;
+
+    if (!PyArg_UnpackTuple(args, "get", 2, 2, &r, &c))
+    {
+        return NULL;
+    }
+
+    int row = 0, col = 0;
+    if (parse_int_index(r, self->mat->rows, &row) != 0 ||
+        parse_int_index(c, self->mat->cols, &col) != 0)
+    {
+        return NULL;
+    }
+
+    double ans = get(self->mat, row, col);
+    return PyFloat_FromDouble(ans);
+}
+
+/*
+ * Create an array of PyMethodDef structs to hold the instance methods.
+ * Name the python function corresponding to Matrixox_get_value as "get" and Matrixox_set_value
+ * as "set"
+ * You might find this link helpful: https://docs.python.org/3.6/c-api/structures.html
+ */
+PyMethodDef Matrixox_methods[] = {
+    {"get", (PyCFunction)Matrixox_get_value, METH_VARARGS, "Gets a value from the matrix at (row, col)"},
+    {"set", (PyCFunction)Matrixox_set_value, METH_VARARGS, "Sets a value in the matrix at (row, col, val)"},
+    {"to_list", (PyCFunction)Matrixox_to_list, METH_NOARGS, "Return a list representation of numox.Matrix"},
+    {NULL, NULL, 0, NULL}};
+
+/* SLICE HELPERS */
 
 static int parse_slice_step1(PyObject *slice_obj, Py_ssize_t len, Py_ssize_t *start, Py_ssize_t *slicelength)
 {
@@ -865,8 +965,12 @@ static PyObject *create_matrixox_ref(matrix *from, int row_offset, int col_offse
 /*
  * Given a numox.Matrix `self`, index into it with `key`. Return the indexed result.
  */
-PyObject *Matrixox_subscript(Matrixox *self, PyObject *key)
+static PyObject *Matrixox_subscript(Matrixox *self, PyObject *key)
 {
+    if (check_initialized(self) != 0)
+    {
+        return NULL;
+    }
     if (self->mat->is_1d == 1)
     {
         int len = (self->mat->rows == 1) ? self->mat->cols : self->mat->rows;
@@ -1079,8 +1183,12 @@ static int set_2d_seq_values(matrix *mat, int row_start, int col_start, Py_ssize
 /*
  * Given a numox.Matrix `self`, index into it with `key`, and set the indexed result to `v`.
  */
-int Matrixox_set_subscript(Matrixox *self, PyObject *key, PyObject *v)
+static int Matrixox_set_subscript(Matrixox *self, PyObject *key, PyObject *v)
 {
+    if (check_initialized(self) != 0)
+    {
+        return -1;
+    }
     if (!v)
     {
         PyErr_SetString(PyExc_TypeError, "Deleting matrix elements is not supported");
@@ -1247,6 +1355,7 @@ static int Matrixox_getbuffer(Matrixox *self, Py_buffer *view, int flags)
     }
 
     int is_c_contig = 0;
+    int is_f_contig = 0;
     if (self->mat->is_1d)
     {
         view->ndim = 1;
@@ -1255,6 +1364,7 @@ static int Matrixox_getbuffer(Matrixox *self, Py_buffer *view, int flags)
                                ? (Py_ssize_t)sizeof(double)
                                : (Py_ssize_t)self->mat->stride * (Py_ssize_t)sizeof(double);
         is_c_contig = (self->mat->rows == 1) || (self->mat->stride == 1);
+        is_f_contig = is_c_contig;
     }
     else
     {
@@ -1264,11 +1374,13 @@ static int Matrixox_getbuffer(Matrixox *self, Py_buffer *view, int flags)
         info->strides[0] = (Py_ssize_t)self->mat->stride * (Py_ssize_t)sizeof(double);
         info->strides[1] = (Py_ssize_t)sizeof(double);
         is_c_contig = (self->mat->stride == self->mat->cols);
+        is_f_contig = 0;
     }
 
+    int is_any_contig = is_c_contig || is_f_contig;
     if (((flags & PyBUF_C_CONTIGUOUS) == PyBUF_C_CONTIGUOUS && !is_c_contig) ||
-        ((flags & PyBUF_F_CONTIGUOUS) == PyBUF_F_CONTIGUOUS) ||
-        ((flags & PyBUF_ANY_CONTIGUOUS) == PyBUF_ANY_CONTIGUOUS && !is_c_contig) ||
+        ((flags & PyBUF_F_CONTIGUOUS) == PyBUF_F_CONTIGUOUS && !is_f_contig) ||
+        ((flags & PyBUF_ANY_CONTIGUOUS) == PyBUF_ANY_CONTIGUOUS && !is_any_contig) ||
         ((flags & PyBUF_STRIDES) != PyBUF_STRIDES && !is_c_contig))
     {
         free(info);
@@ -1287,14 +1399,15 @@ static int Matrixox_getbuffer(Matrixox *self, Py_buffer *view, int flags)
     view->strides = (flags & PyBUF_STRIDES) ? info->strides : NULL;
     view->suboffsets = NULL;
     view->internal = info;
+    self->export_count++;
     return 0;
 }
 
 static void Matrixox_releasebuffer(Matrixox *self, Py_buffer *view)
 {
-    (void)self;
     free(view->internal);
     view->internal = NULL;
+    self->export_count--;
 }
 
 PyBufferProcs Matrixox_as_buffer = {
@@ -1346,7 +1459,12 @@ PyMODINIT_FUNC PyInit_numox(void)
         return NULL;
 
     Py_INCREF(&MatrixoxType);
-    PyModule_AddObject(m, "Matrix", (PyObject *)&MatrixoxType);
+    if (PyModule_AddObject(m, "Matrix", (PyObject *)&MatrixoxType) < 0)
+    {
+        Py_DECREF(&MatrixoxType);
+        Py_DECREF(m);
+        return NULL;
+    }
     fflush(stdout);
     return m;
 }

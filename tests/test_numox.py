@@ -140,22 +140,72 @@ class TestNumox(unittest.TestCase):
 
     def test_no_refcount_leaks(self):
         m = nc.Matrix(3, 3, 1.0)
-        # Warm up interned/cached objects
         _ = repr(m)
         gc.collect()
 
         before = sys.gettotalrefcount() if hasattr(sys, "gettotalrefcount") else None
-        dim_ref_before = sys.getrefcount(m.shape[0])
+        m_ref_before = sys.getrefcount(m)
         for _ in range(500):
             _ = repr(m)
-            tmp = nc.Matrix(3, 3, 2.0)
-            _ = memoryview(tmp)
+            mv = memoryview(m)
+            del mv
+            tmp = nc.Matrix(1, 300, 2.0)
+            del tmp
         gc.collect()
-        dim_ref_after = sys.getrefcount(m.shape[0])
-        self.assertLessEqual(dim_ref_after, dim_ref_before + 2)
+        m_ref_after = sys.getrefcount(m)
+        self.assertEqual(m_ref_after, m_ref_before)
         if before is not None:
             after = sys.gettotalrefcount()
             self.assertLess(after - before, 20)
+
+    def test_uninitialized_and_reinit(self):
+        u = nc.Matrix.__new__(nc.Matrix)
+        with self.assertRaises(AttributeError):
+            _ = u.shape
+        with self.assertRaises(BufferError):
+            _ = memoryview(u)
+
+        for fn in (
+            lambda: repr(u),
+            lambda: u.to_list(),
+            lambda: nc.to_list(u),
+            lambda: u + u,
+            lambda: u - u,
+            lambda: u * u,
+            lambda: u @ u,
+            lambda: -u,
+            lambda: abs(u),
+            lambda: u ** 2,
+            lambda: u[0],
+            lambda: u.get(0, 0),
+            lambda: u.set(0, 0, 1.0),
+        ):
+            with self.assertRaises(RuntimeError):
+                fn()
+
+        with self.assertRaises(RuntimeError):
+            u[0] = 1.0
+
+        valid = nc.Matrix(2, 2, 1.0)
+        with self.assertRaises(RuntimeError):
+            _ = valid + u
+        with self.assertRaises(RuntimeError):
+            _ = valid @ u
+
+        valid.__init__(3, 3, 2.0)
+        self.assertEqual(valid.shape, (3, 3))
+        self.assertEqual(valid.get(2, 2), 2.0)
+
+        mv = memoryview(valid)
+        with self.assertRaises(BufferError):
+            valid.__init__(4, 4, 1.0)
+        self.assertEqual(valid.shape, (3, 3))
+        mv.release()
+        del mv
+
+        valid.__init__(4, 4, 3.0)
+        self.assertEqual(valid.shape, (4, 4))
+        self.assertEqual(valid.get(3, 3), 3.0)
 
 
 if __name__ == "__main__":

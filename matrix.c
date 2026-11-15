@@ -3,6 +3,7 @@
 #endif
 
 #include "matrix.h"
+#include <limits.h>
 #include <stddef.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -17,6 +18,7 @@
 // Include SIMD intrinsics on x86/x86_64
 #if defined(_MSC_VER) && (defined(_M_X64) || defined(_M_IX86))
 #include <intrin.h>
+#include <immintrin.h>
 #elif defined(__GNUC__) && (defined(__x86_64__) || defined(__i386__))
 #include <immintrin.h>
 #include <x86intrin.h>
@@ -50,7 +52,13 @@ static void free_aligned_doubles(double *ptr)
 #endif
 }
 
-static inline uint64_t splitmix64(uint64_t x)
+#if defined(_MSC_VER) && !defined(__cplusplus)
+#define NUMOX_INLINE __inline
+#else
+#define NUMOX_INLINE inline
+#endif
+
+static NUMOX_INLINE uint64_t splitmix64(uint64_t x)
 {
     x += 0x9e3779b97f4a7c15ULL;
     x = (x ^ (x >> 30)) * 0xbf58476d1ce4e5b9ULL;
@@ -58,7 +66,7 @@ static inline uint64_t splitmix64(uint64_t x)
     return x ^ (x >> 31);
 }
 
-static inline uint64_t xorshift64star(uint64_t *state)
+static NUMOX_INLINE uint64_t xorshift64star(uint64_t *state)
 {
     uint64_t x = *state;
     x ^= x >> 12;
@@ -230,7 +238,7 @@ void deallocate_matrix(matrix *mat)
  */
 double get(matrix *mat, int row, int col)
 {
-    return mat->data[row * mat->stride + col];
+    return mat->data[(size_t)row * (size_t)mat->stride + (size_t)col];
 }
 
 /*
@@ -238,7 +246,7 @@ double get(matrix *mat, int row, int col)
  */
 void set(matrix *mat, int row, int col, double val)
 {
-    mat->data[row * mat->stride + col] = val;
+    mat->data[(size_t)row * (size_t)mat->stride + (size_t)col] = val;
 }
 
 /*
@@ -254,26 +262,28 @@ void fill_matrix(matrix *mat, double val)
     int c = mat->cols;
     size_t total = (size_t)r * (size_t)c;
 
-    if (mat->stride == c)
+    if (mat->stride == c && total <= (size_t)INT_MAX)
     {
         double *data = mat->data;
 #ifdef __AVX2__
         __m256d v = _mm256_set1_pd(val);
         size_t vec_end = total & ~(size_t)3;
-        ptrdiff_t idx;
+        int vec_blocks = (int)(vec_end / 4);
+        int b;
 #pragma omp parallel for if (total > 20000)
-        for (idx = 0; idx < (ptrdiff_t)vec_end; idx += 4)
+        for (b = 0; b < vec_blocks; b++)
         {
-            _mm256_storeu_pd(data + idx, v);
+            _mm256_storeu_pd(data + (size_t)b * 4, v);
         }
         for (size_t j = vec_end; j < total; j++)
         {
             data[j] = val;
         }
 #else
-        ptrdiff_t idx;
+        int total_i = (int)total;
+        int idx;
 #pragma omp parallel for if (total > 20000)
-        for (idx = 0; idx < (ptrdiff_t)total; idx++)
+        for (idx = 0; idx < total_i; idx++)
         {
             data[idx] = val;
         }
@@ -318,17 +328,19 @@ int add_matrix(matrix *result, matrix *mat1, matrix *mat2)
     int col = mat2->cols;
     size_t total = (size_t)row * (size_t)col;
 
-    if (result->stride == col && mat1->stride == col && mat2->stride == col)
+    if (result->stride == col && mat1->stride == col && mat2->stride == col && total <= (size_t)INT_MAX)
     {
         double *dst = result->data;
         const double *a = mat1->data;
         const double *b = mat2->data;
 #ifdef __AVX2__
         size_t vec_end = total & ~(size_t)3;
-        ptrdiff_t idx;
+        int vec_blocks = (int)(vec_end / 4);
+        int blk;
 #pragma omp parallel for if (total > 20000)
-        for (idx = 0; idx < (ptrdiff_t)vec_end; idx += 4)
+        for (blk = 0; blk < vec_blocks; blk++)
         {
+            size_t idx = (size_t)blk * 4;
             __m256d v1 = _mm256_loadu_pd(a + idx);
             __m256d v2 = _mm256_loadu_pd(b + idx);
             _mm256_storeu_pd(dst + idx, _mm256_add_pd(v1, v2));
@@ -338,9 +350,10 @@ int add_matrix(matrix *result, matrix *mat1, matrix *mat2)
             dst[j] = a[j] + b[j];
         }
 #else
-        ptrdiff_t idx;
+        int total_i = (int)total;
+        int idx;
 #pragma omp parallel for if (total > 20000)
-        for (idx = 0; idx < (ptrdiff_t)total; idx++)
+        for (idx = 0; idx < total_i; idx++)
         {
             dst[idx] = a[idx] + b[idx];
         }
@@ -390,17 +403,19 @@ int sub_matrix(matrix *result, matrix *mat1, matrix *mat2)
     int col = mat2->cols;
     size_t total = (size_t)row * (size_t)col;
 
-    if (result->stride == col && mat1->stride == col && mat2->stride == col)
+    if (result->stride == col && mat1->stride == col && mat2->stride == col && total <= (size_t)INT_MAX)
     {
         double *dst = result->data;
         const double *a = mat1->data;
         const double *b = mat2->data;
 #ifdef __AVX2__
         size_t vec_end = total & ~(size_t)3;
-        ptrdiff_t idx;
+        int vec_blocks = (int)(vec_end / 4);
+        int blk;
 #pragma omp parallel for if (total > 20000)
-        for (idx = 0; idx < (ptrdiff_t)vec_end; idx += 4)
+        for (blk = 0; blk < vec_blocks; blk++)
         {
+            size_t idx = (size_t)blk * 4;
             __m256d v1 = _mm256_loadu_pd(a + idx);
             __m256d v2 = _mm256_loadu_pd(b + idx);
             _mm256_storeu_pd(dst + idx, _mm256_sub_pd(v1, v2));
@@ -410,9 +425,10 @@ int sub_matrix(matrix *result, matrix *mat1, matrix *mat2)
             dst[j] = a[j] - b[j];
         }
 #else
-        ptrdiff_t idx;
+        int total_i = (int)total;
+        int idx;
 #pragma omp parallel for if (total > 20000)
-        for (idx = 0; idx < (ptrdiff_t)total; idx++)
+        for (idx = 0; idx < total_i; idx++)
         {
             dst[idx] = a[idx] - b[idx];
         }
@@ -494,10 +510,10 @@ int mul_matrix(matrix *result, matrix *mat1, matrix *mat2)
 #ifdef __AVX2__
             for (; i + 4 <= i_end; i += 4)
             {
-                const double *a0 = &mat1->data[(size_t)(i + 0) * (size_t)mat1->stride + k0];
-                const double *a1 = &mat1->data[(size_t)(i + 1) * (size_t)mat1->stride + k0];
-                const double *a2 = &mat1->data[(size_t)(i + 2) * (size_t)mat1->stride + k0];
-                const double *a3 = &mat1->data[(size_t)(i + 3) * (size_t)mat1->stride + k0];
+                const double *a0 = &mat1->data[(size_t)(i + 0) * (size_t)mat1->stride + (size_t)k0];
+                const double *a1 = &mat1->data[(size_t)(i + 1) * (size_t)mat1->stride + (size_t)k0];
+                const double *a2 = &mat1->data[(size_t)(i + 2) * (size_t)mat1->stride + (size_t)k0];
+                const double *a3 = &mat1->data[(size_t)(i + 3) * (size_t)mat1->stride + (size_t)k0];
 
                 double *c0 = &result->data[(size_t)(i + 0) * (size_t)result->stride];
                 double *c1 = &result->data[(size_t)(i + 1) * (size_t)result->stride];
@@ -523,7 +539,7 @@ int mul_matrix(matrix *result, matrix *mat1, matrix *mat2)
                         c30 = _mm256_loadu_pd(c3 + j); c31 = _mm256_loadu_pd(c3 + j + 4);
                     }
 
-                    const double *bk = &mat2->data[(size_t)k0 * (size_t)mat2->stride + j];
+                    const double *bk = &mat2->data[(size_t)k0 * (size_t)mat2->stride + (size_t)j];
                     int b_stride = mat2->stride;
                     for (int k = 0; k < k_len; k++, bk += b_stride)
                     {
@@ -556,7 +572,7 @@ int mul_matrix(matrix *result, matrix *mat1, matrix *mat2)
                     double s1 = (k0 == 0) ? 0.0 : c1[j];
                     double s2 = (k0 == 0) ? 0.0 : c2[j];
                     double s3 = (k0 == 0) ? 0.0 : c3[j];
-                    const double *bk = &mat2->data[(size_t)k0 * (size_t)mat2->stride + j];
+                    const double *bk = &mat2->data[(size_t)k0 * (size_t)mat2->stride + (size_t)j];
                     int b_stride = mat2->stride;
                     for (int k = 0; k < k_len; k++, bk += b_stride)
                     {
@@ -572,7 +588,7 @@ int mul_matrix(matrix *result, matrix *mat1, matrix *mat2)
 #endif
             for (; i < i_end; i++)
             {
-                const double *ai = &mat1->data[(size_t)i * (size_t)mat1->stride + k0];
+                const double *ai = &mat1->data[(size_t)i * (size_t)mat1->stride + (size_t)k0];
                 double *ci = &result->data[(size_t)i * (size_t)result->stride];
                 int j = j0;
 #ifdef __AVX2__
@@ -580,7 +596,7 @@ int mul_matrix(matrix *result, matrix *mat1, matrix *mat2)
                 {
                     __m256d c00 = (k0 == 0) ? _mm256_setzero_pd() : _mm256_loadu_pd(ci + j);
                     __m256d c01 = (k0 == 0) ? _mm256_setzero_pd() : _mm256_loadu_pd(ci + j + 4);
-                    const double *bk = &mat2->data[(size_t)k0 * (size_t)mat2->stride + j];
+                    const double *bk = &mat2->data[(size_t)k0 * (size_t)mat2->stride + (size_t)j];
                     int b_stride = mat2->stride;
                     for (int k = 0; k < k_len; k++, bk += b_stride)
                     {
@@ -595,7 +611,7 @@ int mul_matrix(matrix *result, matrix *mat1, matrix *mat2)
                 for (; j < j_end; j++)
                 {
                     double sum = (k0 == 0) ? 0.0 : ci[j];
-                    const double *bk = &mat2->data[(size_t)k0 * (size_t)mat2->stride + j];
+                    const double *bk = &mat2->data[(size_t)k0 * (size_t)mat2->stride + (size_t)j];
                     int b_stride = mat2->stride;
                     for (int k = 0; k < k_len; k++, bk += b_stride)
                     {
@@ -637,7 +653,7 @@ int pow_matrix(matrix *result, matrix *mat, int pow)
         fill_matrix(result, 0.0);
         for (int i = 0; i < result->rows; i++)
         {
-            result->data[(size_t)i * (size_t)result->stride + i] = 1.0;
+            result->data[(size_t)i * (size_t)result->stride + (size_t)i] = 1.0;
         }
         return 0;
     }
@@ -666,7 +682,7 @@ int pow_matrix(matrix *result, matrix *mat, int pow)
     fill_matrix(result, 0.0);
     for (int i = 0; i < result->rows; i++)
     {
-        result->data[(size_t)i * (size_t)result->stride + i] = 1.0;
+        result->data[(size_t)i * (size_t)result->stride + (size_t)i] = 1.0;
     }
 
     while (pow > 0)
@@ -706,17 +722,19 @@ int neg_matrix(matrix *result, matrix *mat)
     int col = mat->cols;
     size_t total = (size_t)row * (size_t)col;
 
-    if (result->stride == col && mat->stride == col)
+    if (result->stride == col && mat->stride == col && total <= (size_t)INT_MAX)
     {
         double *dst = result->data;
         const double *src = mat->data;
 #ifdef __AVX2__
-        __m256d sign_mask = _mm256_set1_pd(-0.0);
+        __m256d sign_mask = _mm256_castsi256_pd(_mm256_set1_epi64x((long long)0x8000000000000000ULL));
         size_t vec_end = total & ~(size_t)3;
-        ptrdiff_t idx;
+        int vec_blocks = (int)(vec_end / 4);
+        int blk;
 #pragma omp parallel for if (total > 20000)
-        for (idx = 0; idx < (ptrdiff_t)vec_end; idx += 4)
+        for (blk = 0; blk < vec_blocks; blk++)
         {
+            size_t idx = (size_t)blk * 4;
             __m256d v = _mm256_loadu_pd(src + idx);
             _mm256_storeu_pd(dst + idx, _mm256_xor_pd(v, sign_mask));
         }
@@ -725,9 +743,10 @@ int neg_matrix(matrix *result, matrix *mat)
             dst[j] = -src[j];
         }
 #else
-        ptrdiff_t idx;
+        int total_i = (int)total;
+        int idx;
 #pragma omp parallel for if (total > 20000)
-        for (idx = 0; idx < (ptrdiff_t)total; idx++)
+        for (idx = 0; idx < total_i; idx++)
         {
             dst[idx] = -src[idx];
         }
@@ -743,7 +762,7 @@ int neg_matrix(matrix *result, matrix *mat)
         const double *src = &mat->data[(size_t)i * (size_t)mat->stride];
         int j = 0;
 #ifdef __AVX2__
-        __m256d sign_mask = _mm256_set1_pd(-0.0);
+        __m256d sign_mask = _mm256_castsi256_pd(_mm256_set1_epi64x((long long)0x8000000000000000ULL));
         for (; j + 4 <= col; j += 4)
         {
             __m256d v = _mm256_loadu_pd(src + j);
@@ -773,17 +792,19 @@ int abs_matrix(matrix *result, matrix *mat)
     int col = mat->cols;
     size_t total = (size_t)row * (size_t)col;
 
-    if (result->stride == col && mat->stride == col)
+    if (result->stride == col && mat->stride == col && total <= (size_t)INT_MAX)
     {
         double *dst = result->data;
         const double *src = mat->data;
 #ifdef __AVX2__
-        __m256d sign_mask = _mm256_set1_pd(-0.0);
+        __m256d sign_mask = _mm256_castsi256_pd(_mm256_set1_epi64x((long long)0x8000000000000000ULL));
         size_t vec_end = total & ~(size_t)3;
-        ptrdiff_t idx;
+        int vec_blocks = (int)(vec_end / 4);
+        int blk;
 #pragma omp parallel for if (total > 20000)
-        for (idx = 0; idx < (ptrdiff_t)vec_end; idx += 4)
+        for (blk = 0; blk < vec_blocks; blk++)
         {
+            size_t idx = (size_t)blk * 4;
             __m256d v = _mm256_loadu_pd(src + idx);
             _mm256_storeu_pd(dst + idx, _mm256_andnot_pd(sign_mask, v));
         }
@@ -793,9 +814,10 @@ int abs_matrix(matrix *result, matrix *mat)
             dst[j] = (num < 0.0) ? -num : num;
         }
 #else
-        ptrdiff_t idx;
+        int total_i = (int)total;
+        int idx;
 #pragma omp parallel for if (total > 20000)
-        for (idx = 0; idx < (ptrdiff_t)total; idx++)
+        for (idx = 0; idx < total_i; idx++)
         {
             double num = src[idx];
             dst[idx] = (num < 0.0) ? -num : num;
@@ -812,7 +834,7 @@ int abs_matrix(matrix *result, matrix *mat)
         const double *src = &mat->data[(size_t)i * (size_t)mat->stride];
         int j = 0;
 #ifdef __AVX2__
-        __m256d sign_mask = _mm256_set1_pd(-0.0);
+        __m256d sign_mask = _mm256_castsi256_pd(_mm256_set1_epi64x((long long)0x8000000000000000ULL));
         for (; j + 4 <= col; j += 4)
         {
             __m256d v = _mm256_loadu_pd(src + j);

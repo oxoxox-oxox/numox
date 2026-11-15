@@ -8,7 +8,7 @@ def main():
 
     # 根据操作系统和 CPU 架构动态分配编译参数
     if sys.platform == 'win32':
-        CFLAGS = ['/openmp:llvm', '/O2', '/fp:fast', '/GL']
+        CFLAGS = ['/openmp', '/O2', '/fp:fast', '/GL']
         if is_x86:
             CFLAGS.append('/arch:AVX2')
         LDFLAGS = ['/LTCG']

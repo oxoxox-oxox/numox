@@ -294,7 +294,12 @@ int main(void) {
     CU_basic_show_failures(CU_get_failure_list());
     printf("\n\n");
 
-    /* Clean up registry and return */
+    /* Clean up registry and return; CU_get_error() only tracks CUnit API errors */
+    unsigned int failures = CU_get_number_of_failures();
+    CU_ErrorCode err = CU_get_error();
     CU_cleanup_registry();
-    return CU_get_error();
+    if (err != CUE_SUCCESS) {
+        return (int)err;
+    }
+    return (failures > 0) ? 1 : 0;
 }

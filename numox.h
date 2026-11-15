@@ -10,6 +10,7 @@ typedef struct {
     PyObject_HEAD
     matrix* mat;
     PyObject *shape;
+    int export_count;
 } Matrixox;
 
 /* Function definitions */
